@@ -5,13 +5,23 @@ pub enum Op {
     Sub,
 }
 
+// Util Section
+
+fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
+    ws(0).ig_then(p)
+}
+
+pub fn to_end() -> impl Parser<()> {
+    skip_while(|x| x == ' ' || x == '\t', 0).then_ig(tag("\n").or(tag(";")).map(|_| ()).or(eoi))
+}
+
+//Main Code
+
 pub enum Statement {
     LetList,
-    Let(String, Expr),
-    LetOp(String, Op, Expr),
+    Let(Vec<String>, Option<Op>, Vec<Expr>),
     ExportList,
-    Export(String, Expr),
-    ExportOp(String, Op, Expr),
+    Export(Vec<String>, Option<Op>, Vec<Expr>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -25,10 +35,6 @@ pub struct Token {
     line: usize,
     col: usize,
     d: TokenData,
-}
-
-pub fn to_end() -> impl Parser<()> {
-    skip_while(|x| x == ' ' || x == '\t', 0).then_ig(tag("\n").or(tag(";")).map(|_| ()).or(eoi))
 }
 
 #[derive(Debug, PartialEq)]
@@ -51,7 +57,7 @@ pub enum StringPart {
 }
 
 pub fn quoted() -> impl Parser<Vec<StringPart>> {
-    tag("\"").ig_then(repeat_until(string_part(), tag("\"")))
+    tag("\"").ig_then(repeat_until_ig(string_part(), tag("\"")))
 }
 
 pub fn string_part() -> impl Parser<StringPart> {
@@ -70,17 +76,27 @@ pub fn op() -> impl Parser<Op> {
 }
 
 pub fn let_statement() -> impl Parser<Statement> {
-    (s_tag("let").then_ig(to_end()).map(|_| Statement::LetList)).or(s_tag("let")
-        .ig_then(ident())
-        .then(maybe(op()))
-        .then_ig(s_tag("="))
-        .then(expr)
-        .then_ig(to_end())
-        .map(|((id, op), ex)| Statement::Let())
+    wst(tag("let").then_ig(to_end()).map(|_| Statement::LetList)).or(tag("let ")
+        .ig_then(reflect(
+            wst(ident()),
+            wst(maybe(op()).then_ig(tag("="))),
+            wst(expr),
+        ))
+        .map(|(a, b, c)| Statement::Let(a, b, c)))
+}
+
+pub fn export_statement() -> impl Parser<Statement> {
+    wst(tag("export").then_ig(to_end()).map(|_| Statement::LetList)).or(tag("export ")
+        .ig_then(reflect(
+            wst(ident()),
+            wst(maybe(op()).then_ig(tag("="))),
+            wst(expr),
+        ))
+        .map(|(a, b, c)| Statement::Export(a, b, c)))
 }
 
 pub fn statement() -> impl Parser<Statement> {
-    let_statement()
+    let_statement().or(export_statement())
 }
 
 pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
