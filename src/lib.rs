@@ -112,12 +112,15 @@ pub fn op() -> impl Parser<Op> {
 }
 
 pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
-    wst(tag("str")
+    wst(keyword("str")
         .map(|_| VarType::Str)
         .or(keyword("bool").map(|_| VarType::Bool))
         .or(keyword("float").map(|_| VarType::Float))
         .or(keyword("int").map(|_| VarType::Int))
-        .or(tag("[").ig_then(var_type).then_ig(wst(tag("]")))))
+        .or(tag("[")
+            .ig_then(var_type)
+            .then_ig(wst(tag("]")))
+            .map(|c| VarType::Arr(Box::new(c)))))
     .parse(it)
 }
 
@@ -172,12 +175,21 @@ pub fn loop_statement() -> impl Parser<Statement> {
         .or(tag("while ").ig_then(expr).map(|ex| Statement::While(ex)))
 }
 
+pub fn func_def() -> impl Parser<Statement> {
+    //TODO work out how function hints are written
+    keyword("fn")
+        .ig_then(wst(ident()))
+        .then(repeat(wst(var()), 1))
+        .map(|(nm, vars)| Statement::FuncDef(nm, None, vars))
+}
+
 pub fn statement() -> impl Parser<Statement> {
     wst(let_statement()
         .or(export_statement())
         .or(if_statement())
         .or(else_statement())
         .or(loop_statement())
+        .or(func_def())
         .or(keyword("end").map(|_| Statement::End))
         .or(keyword("break").map(|_| Statement::Break))
         .or(keyword("continue").map(|_| Statement::Continue)))
