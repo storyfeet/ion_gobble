@@ -30,9 +30,9 @@ fn ident() -> impl Parser<String> {
 #[derive(Debug)]
 pub enum Statement {
     LetList,
-    Let(Vec<Var>, Option<Op>, Vec<Expr>),
+    Let(Vec<Var>, Option<Op>, Vec<Item>),
     ExportList,
-    Export(Vec<Var>, Option<Op>, Vec<Expr>),
+    Export(Vec<Var>, Option<Op>, Vec<Item>),
     If(Expr),
     Else,
     Elif(Expr),
@@ -45,7 +45,7 @@ pub enum Statement {
     Continue,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum VarType {
     Str,
     Bool,
@@ -54,7 +54,78 @@ pub enum VarType {
     Arr(Box<VarType>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
+pub enum Index {
+    Pos(Item),
+    Range(Option<Item>, Option<Item>),
+    RangeInc(Option<Item>, Option<Item>),
+}
+pub fn index() -> impl Parser<Index> {
+    tag("[").ig_then(
+        (wst(item))
+            .then_ig(tag("]"))
+            .map(|i| Index::Pos(i))
+            .or(maybe(wst(item))
+                .then(wst(tag("..=").or(tag(".."))))
+                .then(maybe(wst(item)))
+                .then_ig(wst(tag("]")))
+                .map(|((l, op), r)| match op {
+                    "..=" => Index::RangeInc(l, r),
+                    ".." => Index::Range(l, r),
+                    _ => Index::Range(l, r),
+                })),
+    )
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Item {
+    Bool(bool),
+    Int(isize),
+    Float(f64),
+    Str(String),
+    Quoted(Vec<StringPart>),
+    Sub(Box<Substitution>),
+}
+pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
+    let p = substitution()
+        .map(|s| Item::Sub(Box::new(s)))
+        .or(quoted().map(|q| Item::Quoted(q)))
+        .or(ident().map(|i| Item::Str(i)));
+    p.parse(it)
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Substitution {
+    sub: Sub,
+    index: Option<Index>,
+}
+pub fn substitution() -> impl Parser<Substitution> {
+    sub()
+        .then(maybe(index()))
+        .map(|(sub, index)| Substitution { sub, index })
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Sub {
+    Var(String),
+    DollarB(Expr),
+    AtVar(String),
+    AtB(Expr),
+}
+pub fn sub() -> impl Parser<Sub> {
+    tag("$(")
+        .ig_then(wst(expr))
+        .then_ig(wst(tag(")")))
+        .map(|e| Sub::DollarB(e))
+        .or(tag("$").ig_then(ident()).map(|i| Sub::Var(i)))
+        .or(tag("@(")
+            .ig_then(wst(expr))
+            .then_ig(wst(tag(")")))
+            .map(|e| Sub::AtB(e)))
+        .or(tag("@").ig_then(ident()).map(|i| Sub::AtVar(i)))
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Var {
     name: String,
     vtype: Option<VarType>,
@@ -62,48 +133,23 @@ pub struct Var {
 
 #[derive(Debug, PartialEq)]
 pub enum Expr {
-    Null,
-    Quoted(Vec<StringPart>),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Token {
-    line: usize,
-    col: usize,
-    d: TokenData,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum TokenData {
-    Let,
-    For,
-    Pipe,
-    DollarOpen,
-    Close,
-    Ident(String), //Just the Var name
-    Var(String),   //$Ident
+    Command(Vec<Item>),
+    Pipe(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum StringPart {
     Lit(String),
     Esc(char),
-    Ident(String),
-    Expr(Expr),
+    Sub(Substitution),
 }
-
 pub fn quoted() -> impl Parser<Vec<StringPart>> {
     tag("\"").ig_then(repeat_until_ig(string_part(), tag("\"")))
 }
 
 pub fn string_part() -> impl Parser<StringPart> {
-    (read_fs(|c| c != '$' && c != '"' && c != '\\', 1).map(|s| StringPart::Lit(s)))
-        .or(tag("$").ig_then(ident()).map(|id| StringPart::Ident(id)))
-        .or(tag("$(")
-            .ig_then(expr)
-            .then_ig(tag(")"))
-            .map(|e| StringPart::Expr(e)))
-        //TODO conside other escape options
+    (read_fs(|c| c != '@' && c != '$' && c != '"' && c != '\\', 1).map(|s| StringPart::Lit(s)))
+        .or(substitution().map(|e| StringPart::Sub(e)))
         .or(tag("\\").ig_then(take_char).map(|c| StringPart::Esc(c)))
 }
 
@@ -197,7 +243,7 @@ pub fn statement() -> impl Parser<Statement> {
 }
 
 pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
-    let p = quoted().map(|r| Expr::Quoted(r));
+    let p = repeat(wst(item), 1).map(|l| Expr::Command(l));
     p.parse(it)
 }
 
