@@ -13,4 +13,5 @@ path="src/main.rs"
 [lib]
 
 [dependencies]
-gobble = {path="../gobble/"}
+gobble= "0.1.4"
+#gobble = {path="../gobble/"}

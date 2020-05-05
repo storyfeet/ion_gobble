@@ -39,7 +39,7 @@ pub enum Statement {
     End,
     While(Expr),
     For(Vec<Var>, Expr),
-    //TODO
+    //TODO work out where ion puts func description
     FuncDef(String, Option<String>, Vec<Var>),
     Break,
     Continue,
@@ -83,13 +83,20 @@ pub enum Item {
     Int(isize),
     Float(f64),
     Str(String),
+    Array(Vec<Item>),
     Quoted(Vec<StringPart>),
     Sub(Box<Substitution>),
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
+    //TODO float
     let p = substitution()
         .map(|s| Item::Sub(Box::new(s)))
         .or(quoted().map(|q| Item::Quoted(q)))
+        .or(common_bool.map(|b| Item::Bool(b)))
+        .or(tag("[")
+            .ig_then(repeat_until_ig(wst(item), wst(tag("]"))))
+            .map(|l| Item::Array(l)))
+        .or(common_int.map(|n| Item::Int(n)))
         .or(ident().map(|i| Item::Str(i)));
     p.parse(it)
 }
@@ -181,7 +188,7 @@ pub fn let_statement() -> impl Parser<Statement> {
         maybe(reflect(
             wst(var()),
             wst(maybe(op()).then_ig(tag("="))),
-            wst(expr),
+            wst(item),
         ))
         .map(|op| match op {
             Some((a, b, c)) => Statement::Let(a, b, c),
@@ -195,7 +202,7 @@ pub fn export_statement() -> impl Parser<Statement> {
         maybe(reflect(
             wst(var()),
             wst(maybe(op()).then_ig(tag("="))),
-            wst(expr),
+            wst(item),
         ))
         .map(|op| match op {
             Some((a, b, c)) => Statement::Export(a, b, c),
