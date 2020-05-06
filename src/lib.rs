@@ -41,6 +41,7 @@ pub enum Statement {
     For(Vec<Var>, Expr),
     //TODO work out where ion puts func description
     FuncDef(String, Option<String>, Vec<Var>),
+    Command(Vec<Item>),
     Break,
     Continue,
 }
@@ -60,11 +61,13 @@ pub enum Index {
     Range(Option<Item>, Option<Item>),
     RangeInc(Option<Item>, Option<Item>),
 }
+
 pub fn index() -> impl Parser<Index> {
     tag("[").ig_then(
         (wst(item))
             .then_ig(tag("]"))
             .map(|i| Index::Pos(i))
+            // Or do with ranges
             .or(maybe(wst(item))
                 .then(wst(tag("..=").or(tag(".."))))
                 .then(maybe(wst(item)))
@@ -82,7 +85,7 @@ pub enum Item {
     Bool(bool),
     Int(isize),
     Float(f64),
-    Str(String),
+    Str(Vec<UnquotedPart>),
     Array(Vec<Item>),
     Quoted(Vec<StringPart>),
     Sub(Box<Substitution>),
@@ -96,8 +99,9 @@ pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
         .or(tag("[")
             .ig_then(repeat_until_ig(wst(item), wst(tag("]"))))
             .map(|l| Item::Array(l)))
+        .or(common_float.map(|f| Item::Float(f)))
         .or(common_int.map(|n| Item::Int(n)))
-        .or(ident().map(|i| Item::Str(i)));
+        .or(unquoted().map(|i| Item::Str(i)));
     p.parse(it)
 }
 
@@ -158,6 +162,29 @@ pub fn string_part() -> impl Parser<StringPart> {
     (read_fs(|c| c != '@' && c != '$' && c != '"' && c != '\\', 1).map(|s| StringPart::Lit(s)))
         .or(substitution().map(|e| StringPart::Sub(e)))
         .or(tag("\\").ig_then(take_char).map(|c| StringPart::Esc(c)))
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UnquotedPart {
+    Lit(String),
+    Esc(char),
+    Sub(Substitution),
+    Quoted(Vec<StringPart>),
+}
+
+pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
+    (read_fs(
+        |c| !c.is_whitespace() && c != '@' && c != '$' && c != '"' && c != '\\',
+        1,
+    )
+    .map(|s| UnquotedPart::Lit(s)))
+    .or(quoted().map(|q| UnquotedPart::Quoted(q)))
+    .or(substitution().map(|e| UnquotedPart::Sub(e)))
+    .or(tag("\\").ig_then(take_char).map(|c| UnquotedPart::Esc(c)))
+}
+
+pub fn unquoted() -> impl Parser<Vec<UnquotedPart>> {
+    repeat(unquoted_string_part(), 1)
 }
 
 pub fn op() -> impl Parser<Op> {
@@ -236,6 +263,10 @@ pub fn func_def() -> impl Parser<Statement> {
         .map(|(nm, vars)| Statement::FuncDef(nm, None, vars))
 }
 
+pub fn command_statement() -> impl Parser<Vec<Item>> {
+    repeat(wst(item), 1)
+}
+
 pub fn statement() -> impl Parser<Statement> {
     wst(let_statement()
         .or(export_statement())
@@ -246,6 +277,7 @@ pub fn statement() -> impl Parser<Statement> {
         .or(keyword("end").map(|_| Statement::End))
         .or(keyword("break").map(|_| Statement::Break))
         .or(keyword("continue").map(|_| Statement::Continue)))
+    .or(command_statement().map(|c| Statement::Command(c)))
     .then_ig(to_end())
 }
 
