@@ -10,6 +10,7 @@ pub enum Op {
 
 fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
     ws(0).ig_then(p)
+    //repeat(" ".or("\t").or("\\\n"), 0).ig_then(p)
 }
 
 pub fn to_end() -> impl Parser<()> {
@@ -41,9 +42,24 @@ pub enum Statement {
     For(Vec<Var>, Expr),
     //TODO work out where ion puts func description
     FuncDef(String, Option<String>, Vec<Var>),
-    Command(Vec<Item>),
+    //Command(Vec<Item>),
+    Expr(Expr),
     Break,
     Continue,
+}
+pub fn statement() -> impl Parser<Statement> {
+    wst(let_statement()
+        .or(export_statement())
+        .or(if_statement())
+        .or(else_statement())
+        .or(loop_statement())
+        .or(func_def())
+        .or(keyword("end").map(|_| Statement::End))
+        .or(keyword("break").map(|_| Statement::Break))
+        .or(keyword("continue").map(|_| Statement::Continue)))
+    .or(expr.map(|e| Statement::Expr(e)))
+    //.or(command_statement().map(|c| Statement::Command(c)))
+    .then_ig(to_end())
 }
 
 #[derive(Debug, PartialEq)]
@@ -111,9 +127,7 @@ pub struct Substitution {
     index: Option<Index>,
 }
 pub fn substitution() -> impl Parser<Substitution> {
-    sub()
-        .then(maybe(index()))
-        .map(|(sub, index)| Substitution { sub, index })
+    (sub(), maybe(index())).map(|(sub, index)| Substitution { sub, index })
 }
 
 #[derive(Debug, PartialEq)]
@@ -124,16 +138,16 @@ pub enum Sub {
     AtB(Expr),
 }
 pub fn sub() -> impl Parser<Sub> {
-    tag("$(")
-        .ig_then(wst(expr))
-        .then_ig(wst(tag(")")))
-        .map(|e| Sub::DollarB(e))
-        .or(tag("$").ig_then(ident()).map(|i| Sub::Var(i)))
-        .or(tag("@(")
-            .ig_then(wst(expr))
+    or4(
+        "$(".ig_then(wst(expr))
+            .then_ig(wst(")"))
+            .map(|e| Sub::DollarB(e)),
+        "$".ig_then(ident()).map(|i| Sub::Var(i)),
+        "@(".ig_then(wst(expr))
             .then_ig(wst(tag(")")))
-            .map(|e| Sub::AtB(e)))
-        .or(tag("@").ig_then(ident()).map(|i| Sub::AtVar(i)))
+            .map(|e| Sub::AtB(e)),
+        "@".ig_then(ident()).map(|i| Sub::AtVar(i)),
+    )
 }
 
 #[derive(Debug, PartialEq)]
@@ -147,6 +161,13 @@ pub enum Expr {
     Command(Vec<Item>),
     Pipe(Box<Expr>, Box<Expr>),
 }
+pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
+    println!("Expression Coming {}", it.lc().1);
+
+    let p = repeat(wst(item), 1).map(|l| Expr::Command(l));
+    //TODO pipe
+    p.parse(it)
+}
 
 #[derive(Debug, PartialEq)]
 pub enum StringPart {
@@ -159,9 +180,11 @@ pub fn quoted() -> impl Parser<Vec<StringPart>> {
 }
 
 pub fn string_part() -> impl Parser<StringPart> {
-    (read_fs(|c| c != '@' && c != '$' && c != '"' && c != '\\', 1).map(|s| StringPart::Lit(s)))
-        .or(substitution().map(|e| StringPart::Sub(e)))
-        .or(tag("\\").ig_then(take_char).map(|c| StringPart::Esc(c)))
+    or3(
+        read_fs(|c| c != '@' && c != '$' && c != '"' && c != '\\', 1).map(|s| StringPart::Lit(s)),
+        substitution().map(|e| StringPart::Sub(e)),
+        "\\".ig_then(take_char).map(|c| StringPart::Esc(c)),
+    )
 }
 
 #[derive(Debug, PartialEq)]
@@ -174,7 +197,7 @@ pub enum UnquotedPart {
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     (read_fs(
-        |c| !c.is_whitespace() && c != '@' && c != '$' && c != '"' && c != '\\',
+        |c| !c.is_whitespace() && c != ')' && c != '@' && c != '$' && c != '"' && c != '\\',
         1,
     )
     .map(|s| UnquotedPart::Lit(s)))
@@ -188,7 +211,7 @@ pub fn unquoted() -> impl Parser<Vec<UnquotedPart>> {
 }
 
 pub fn op() -> impl Parser<Op> {
-    s_tag("+").map(|_| Op::Add)
+    "+".map(|_| Op::Add)
 }
 
 pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
@@ -211,31 +234,19 @@ pub fn var() -> impl Parser<Var> {
 }
 
 pub fn let_statement() -> impl Parser<Statement> {
-    keyword("let").ig_then(
-        maybe(reflect(
-            wst(var()),
-            wst(maybe(op()).then_ig(tag("="))),
-            wst(item),
-        ))
-        .map(|op| match op {
-            Some((a, b, c)) => Statement::Let(a, b, c),
-            None => Statement::LetList,
-        }),
-    )
+    keyword("let").ig_then(or(
+        peek(to_end()).map(|_| Statement::LetList),
+        reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
+            .map(|(a, b, c)| Statement::Let(a, b, c)),
+    ))
 }
 
 pub fn export_statement() -> impl Parser<Statement> {
-    keyword("export").ig_then(
-        maybe(reflect(
-            wst(var()),
-            wst(maybe(op()).then_ig(tag("="))),
-            wst(item),
-        ))
-        .map(|op| match op {
-            Some((a, b, c)) => Statement::Export(a, b, c),
-            None => Statement::ExportList,
-        }),
-    )
+    keyword("export").ig_then(or(
+        peek(to_end()).map(|_| Statement::ExportList),
+        reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
+            .map(|(a, b, c)| Statement::Export(a, b, c)),
+    ))
 }
 
 pub fn if_statement() -> impl Parser<Statement> {
@@ -265,25 +276,6 @@ pub fn func_def() -> impl Parser<Statement> {
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
     repeat(wst(item), 1)
-}
-
-pub fn statement() -> impl Parser<Statement> {
-    wst(let_statement()
-        .or(export_statement())
-        .or(if_statement())
-        .or(else_statement())
-        .or(loop_statement())
-        .or(func_def())
-        .or(keyword("end").map(|_| Statement::End))
-        .or(keyword("break").map(|_| Statement::Break))
-        .or(keyword("continue").map(|_| Statement::Continue)))
-    .or(command_statement().map(|c| Statement::Command(c)))
-    .then_ig(to_end())
-}
-
-pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
-    let p = repeat(wst(item), 1).map(|l| Expr::Command(l));
-    p.parse(it)
 }
 
 #[cfg(test)]
