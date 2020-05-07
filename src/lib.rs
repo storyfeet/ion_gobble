@@ -157,16 +157,45 @@ pub struct Var {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Command {
+    v: Vec<Item>,
+}
+
+pub fn command() -> impl Parser<Command> {
+    repeat(wst(item), 1).map(|v| Command { v })
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Pipe {
+    Bar,
+    Append,
+    Write,
+    Stdout,
+    Stderr,
+}
+
+pub fn pipe() -> impl Parser<Pipe> {
+    or5(
+        "|".map(|_| Pipe::Bar),
+        ">>".map(|_| Pipe::Append),
+        ">".map(|_| Pipe::Write),
+        "&>".map(|_| Pipe::Stdout),
+        "&2>".map(|_| Pipe::Stderr),
+    )
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Expr {
-    Command(Vec<Item>),
-    Pipe(Box<Expr>, Box<Expr>),
+    Command(Command),
+    Pipe(Pipe, Box<Command>, Box<Expr>),
 }
 pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
-    println!("Expression Coming {}", it.lc().1);
-
-    let p = repeat(wst(item), 1).map(|l| Expr::Command(l));
-    //TODO pipe
-    p.parse(it)
+    (command(), maybe((wst(pipe()), expr)))
+        .map(|(l, popt)| match popt {
+            Some((p, r)) => Expr::Pipe(p, Box::new(l), Box::new(r)),
+            None => Expr::Command(l),
+        })
+        .parse(it)
 }
 
 #[derive(Debug, PartialEq)]
@@ -197,7 +226,11 @@ pub enum UnquotedPart {
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     (read_fs(
-        |c| !c.is_whitespace() && c != ')' && c != '@' && c != '$' && c != '"' && c != '\\',
+        |c| match c {
+            a if a.is_whitespace() => false,
+            '(' | ')' | '@' | '$' | '\\' | '"' | '|' | '&' | '>' | '<' => false,
+            _ => true,
+        },
         1,
     )
     .map(|s| UnquotedPart::Lit(s)))
