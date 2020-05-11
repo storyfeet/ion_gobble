@@ -14,16 +14,11 @@ fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
 }
 
 pub fn to_end() -> impl Parser<()> {
-    skip_while(|x| x == ' ' || x == '\t', 0).then_ig(tag("\n").or(tag(";")).map(|_| ()).or(eoi))
+    skip_while(" \t", 0).then_ig(or("\n;".one().asv(()), eoi))
 }
 
 fn ident() -> impl Parser<String> {
-    read_fs(is_alpha, 1)
-        .then(read_fs(is_alpha_num, 0))
-        .map(|(mut a, b)| {
-            a.push_str(&b);
-            a
-        })
+    string_2_parts((Alpha, '_').min_n(1), (Alpha, NumDigit, '_').any())
 }
 
 //Main Code
@@ -62,7 +57,7 @@ pub fn statement() -> impl Parser<Statement> {
     .then_ig(to_end())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum VarType {
     Str,
     Bool,
@@ -79,15 +74,15 @@ pub enum Index {
 }
 
 pub fn index() -> impl Parser<Index> {
-    tag("[").ig_then(
+    "[".ig_then(
         (wst(item))
-            .then_ig(tag("]"))
+            .then_ig("]")
             .map(|i| Index::Pos(i))
             // Or do with ranges
             .or(maybe(wst(item))
-                .then(wst(tag("..=").or(tag(".."))))
+                .then(wst("..=".or("..")))
                 .then(maybe(wst(item)))
-                .then_ig(wst(tag("]")))
+                .then_ig(wst("]"))
                 .map(|((l, op), r)| match op {
                     "..=" => Index::RangeInc(l, r),
                     ".." => Index::Range(l, r),
@@ -112,8 +107,8 @@ pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
         .map(|s| Item::Sub(Box::new(s)))
         .or(quoted().map(|q| Item::Quoted(q)))
         .or(common_bool.map(|b| Item::Bool(b)))
-        .or(tag("[")
-            .ig_then(repeat_until_ig(wst(item), wst(tag("]"))))
+        .or("["
+            .ig_then(repeat_until_ig(wst(item), wst("]")))
             .map(|l| Item::Array(l)))
         .or(common_float.map(|f| Item::Float(f)))
         .or(common_int.map(|n| Item::Int(n)))
@@ -144,7 +139,7 @@ pub fn sub() -> impl Parser<Sub> {
             .map(|e| Sub::DollarB(e)),
         "$".ig_then(ident()).map(|i| Sub::Var(i)),
         "@(".ig_then(wst(expr))
-            .then_ig(wst(tag(")")))
+            .then_ig(wst(")"))
             .map(|e| Sub::AtB(e)),
         "@".ig_then(ident()).map(|i| Sub::AtVar(i)),
     )
@@ -165,7 +160,7 @@ pub fn command() -> impl Parser<Command> {
     repeat(wst(item), 1).map(|v| Command { v })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Pipe {
     Bar,
     Append,
@@ -176,11 +171,11 @@ pub enum Pipe {
 
 pub fn pipe() -> impl Parser<Pipe> {
     or5(
-        "|".map(|_| Pipe::Bar),
-        ">>".map(|_| Pipe::Append),
-        ">".map(|_| Pipe::Write),
-        "&>".map(|_| Pipe::Stdout),
-        "&2>".map(|_| Pipe::Stderr),
+        "|".asv(Pipe::Bar),
+        ">>".asv(Pipe::Append),
+        ">".asv(Pipe::Write),
+        "&>".asv(Pipe::Stdout),
+        "&2>".asv(Pipe::Stderr),
     )
 }
 
@@ -205,12 +200,14 @@ pub enum StringPart {
     Sub(Substitution),
 }
 pub fn quoted() -> impl Parser<Vec<StringPart>> {
-    tag("\"").ig_then(repeat_until_ig(string_part(), tag("\"")))
+    '"'.ig_then(repeat_until_ig(string_part(), '"'))
 }
 
 pub fn string_part() -> impl Parser<StringPart> {
     or3(
-        read_fs(|c| c != '@' && c != '$' && c != '"' && c != '\\', 1).map(|s| StringPart::Lit(s)),
+        (|c| !("@$\"\\").char_bool(c))
+            .min_n(1)
+            .map(|s| StringPart::Lit(s)),
         substitution().map(|e| StringPart::Sub(e)),
         "\\".ig_then(take_char).map(|c| StringPart::Esc(c)),
     )
@@ -225,18 +222,14 @@ pub enum UnquotedPart {
 }
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
-    (read_fs(
-        |c| match c {
-            a if a.is_whitespace() => false,
-            '(' | ')' | '@' | '$' | '\\' | '"' | '|' | '&' | '>' | '<' => false,
-            _ => true,
-        },
-        1,
+    or4(
+        (|c| !"()@$\\\"|&><".char_bool(c))
+            .min_n(1)
+            .map(|s| UnquotedPart::Lit(s)),
+        quoted().map(|q| UnquotedPart::Quoted(q)),
+        substitution().map(|e| UnquotedPart::Sub(e)),
+        '\\'.ig_then(take_char).map(|c| UnquotedPart::Esc(c)),
     )
-    .map(|s| UnquotedPart::Lit(s)))
-    .or(quoted().map(|q| UnquotedPart::Quoted(q)))
-    .or(substitution().map(|e| UnquotedPart::Sub(e)))
-    .or(tag("\\").ig_then(take_char).map(|c| UnquotedPart::Esc(c)))
 }
 
 pub fn unquoted() -> impl Parser<Vec<UnquotedPart>> {
@@ -249,20 +242,20 @@ pub fn op() -> impl Parser<Op> {
 
 pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
     wst(keyword("str")
-        .map(|_| VarType::Str)
-        .or(keyword("bool").map(|_| VarType::Bool))
-        .or(keyword("float").map(|_| VarType::Float))
-        .or(keyword("int").map(|_| VarType::Int))
-        .or(tag("[")
+        .asv(VarType::Str)
+        .or(keyword("bool").asv(VarType::Bool))
+        .or(keyword("float").asv(VarType::Float))
+        .or(keyword("int").asv(VarType::Int))
+        .or('['
             .ig_then(var_type)
-            .then_ig(wst(tag("]")))
+            .then_ig(wst(']'))
             .map(|c| VarType::Arr(Box::new(c)))))
     .parse(it)
 }
 
 pub fn var() -> impl Parser<Var> {
     ident()
-        .then(maybe(wst(tag(":")).ig_then(var_type)))
+        .then(maybe(wst(':').ig_then(var_type)))
         .map(|(n, t)| Var { name: n, vtype: t })
 }
 
@@ -294,17 +287,17 @@ pub fn else_statement() -> impl Parser<Statement> {
 
 pub fn loop_statement() -> impl Parser<Statement> {
     keyword("for")
-        .ig_then(repeat_until_ig(wst(var()), wst(tag("in "))).then(wst(expr)))
+        .ig_then(repeat_until_ig(wst(var()), wst(keyword("in"))).then(wst(expr)))
         .map(|(vars, ex)| Statement::For(vars, ex))
-        .or(tag("while ").ig_then(expr).map(|ex| Statement::While(ex)))
+        .or(keyword("while")
+            .ig_then(expr)
+            .map(|ex| Statement::While(ex)))
 }
 
 pub fn func_def() -> impl Parser<Statement> {
     //TODO work out how function hints are written
-    keyword("fn")
-        .ig_then(wst(ident()))
-        .then(repeat(wst(var()), 1))
-        .map(|(nm, vars)| Statement::FuncDef(nm, None, vars))
+    (keyword("fn"), wst(ident()), repeat(wst(var()), 1))
+        .map(|(_, nm, vars)| Statement::FuncDef(nm, None, vars))
 }
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
