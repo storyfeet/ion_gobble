@@ -223,12 +223,12 @@ pub enum UnquotedPart {
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     or4(
-        (|c| !"()@$\\\"|&><".char_bool(c))
+        Any.except(" \n\r()@$\\\"|&><")
             .min_n(1)
             .map(|s| UnquotedPart::Lit(s)),
         quoted().map(|q| UnquotedPart::Quoted(q)),
         substitution().map(|e| UnquotedPart::Sub(e)),
-        '\\'.ig_then(take_char).map(|c| UnquotedPart::Esc(c)),
+        '\\'.ig_then(Any.one()).map(|c| UnquotedPart::Esc(c)),
     )
 }
 
