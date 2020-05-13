@@ -260,43 +260,53 @@ pub fn var() -> impl Parser<Var> {
 }
 
 pub fn let_statement() -> impl Parser<Statement> {
-    keyword("let").ig_then(or(
-        peek(to_end()).map(|_| Statement::LetList),
-        reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
-            .map(|(a, b, c)| Statement::Let(a, b, c)),
-    ))
+    keyword("let").ig_then(
+        or(
+            peek(to_end()).map(|_| Statement::LetList),
+            reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
+                .map(|(a, b, c)| Statement::Let(a, b, c)),
+        )
+        .brk(),
+    )
 }
 
 pub fn export_statement() -> impl Parser<Statement> {
-    keyword("export").ig_then(or(
-        peek(to_end()).map(|_| Statement::ExportList),
-        reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
-            .map(|(a, b, c)| Statement::Export(a, b, c)),
-    ))
+    keyword("export").ig_then(
+        or(
+            peek(to_end()).map(|_| Statement::ExportList),
+            reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
+                .map(|(a, b, c)| Statement::Export(a, b, c)),
+        )
+        .brk(),
+    )
 }
 
 pub fn if_statement() -> impl Parser<Statement> {
-    keyword("if").ig_then(expr).map(|e| Statement::If(e))
+    keyword("if").ig_then(expr.brk()).map(|e| Statement::If(e))
 }
 
 pub fn else_statement() -> impl Parser<Statement> {
-    keyword("else")
-        .map(|_| Statement::Else)
-        .or(keyword("elif").ig_then(expr).map(|e| Statement::Elif(e)))
+    keyword("else").map(|_| Statement::Else).or(keyword("elif")
+        .ig_then(expr.brk())
+        .map(|e| Statement::Elif(e)))
 }
 
 pub fn loop_statement() -> impl Parser<Statement> {
     keyword("for")
-        .ig_then(repeat_until_ig(wst(var()), wst(keyword("in"))).then(wst(expr)))
+        .ig_then(
+            repeat_until_ig(wst(var()), wst(keyword("in")))
+                .then(wst(expr))
+                .brk(),
+        )
         .map(|(vars, ex)| Statement::For(vars, ex))
         .or(keyword("while")
-            .ig_then(expr)
+            .ig_then(expr.brk())
             .map(|ex| Statement::While(ex)))
 }
 
 pub fn func_def() -> impl Parser<Statement> {
     //TODO work out how function hints are written
-    (keyword("fn"), wst(ident()), repeat(wst(var()), 1))
+    (keyword("fn"), wst(ident()), repeat(wst(var()), 1).brk())
         .map(|(_, nm, vars)| Statement::FuncDef(nm, None, vars))
 }
 
