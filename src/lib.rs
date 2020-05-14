@@ -3,7 +3,7 @@ use gobble::*;
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Op {
     Add,
     Sub,
@@ -31,7 +31,7 @@ fn ident() -> impl Parser<String> {
 
 //Main Code
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Statement {
     LetList,
     Let(Vec<Var>, Option<Op>, Vec<Item>),
@@ -44,6 +44,7 @@ pub enum Statement {
     While(Expr),
     For(Vec<Var>, Expr),
     //TODO work out where ion puts func description
+    FuncList,
     FuncDef(String, Option<String>, Vec<Var>),
     //Command(Vec<Item>),
     Expr(Expr),
@@ -250,7 +251,7 @@ pub enum UnquotedPart {
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     or4(
-        Any.except(" \n\r()@$\\\"|&><^#")
+        Any.except(" \n\r()@$\\\"|&><^#;")
             .min_n(1)
             .map(|s| UnquotedPart::Lit(s)),
         quoted().map(|q| UnquotedPart::Quoted(q)),
@@ -333,13 +334,15 @@ pub fn loop_statement() -> impl Parser<Statement> {
 
 pub fn func_def() -> impl Parser<Statement> {
     //TODO work out how function hints are written
-    (
-        keyword("fn"),
-        wst(ident()),
-        repeat(wst(var()), 1).brk(),
-        maybe((wst("--"), Any.except("\n;").any())),
-    )
-        .map(|(_, nm, vars, _)| Statement::FuncDef(nm, None, vars))
+    keyword("fn").ig_then(or(
+        peek(to_end()).map(|_| Statement::FuncList),
+        (
+            wst(ident()),
+            repeat(wst(var()), 1).brk(),
+            maybe(wst("--").ig_then(Any.except("\n;").any())),
+        )
+            .map(|(nm, vars, doc)| Statement::FuncDef(nm, doc, vars)),
+    ))
 }
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
