@@ -242,7 +242,7 @@ pub enum UnquotedPart {
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     or4(
-        Any.except(" \n\r()@$\\\"|&><")
+        Any.except(" \n\r()@$\\\"|&><^")
             .min_n(1)
             .map(|s| UnquotedPart::Lit(s)),
         quoted().map(|q| UnquotedPart::Quoted(q)),
