@@ -325,8 +325,13 @@ pub fn loop_statement() -> impl Parser<Statement> {
 
 pub fn func_def() -> impl Parser<Statement> {
     //TODO work out how function hints are written
-    (keyword("fn"), wst(ident()), repeat(wst(var()), 1).brk())
-        .map(|(_, nm, vars)| Statement::FuncDef(nm, None, vars))
+    (
+        keyword("fn"),
+        wst(ident()),
+        repeat(wst(var()), 1).brk(),
+        maybe((wst("--"), Any.except("\n;").any())),
+    )
+        .map(|(_, nm, vars, _)| Statement::FuncDef(nm, None, vars))
 }
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
