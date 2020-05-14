@@ -161,22 +161,41 @@ pub fn command() -> impl Parser<Command> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Pipe {
+pub enum OutputType {
+    StdErr,
+    StdOut,
+    Combined,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum PipeType {
     Bar,
     Append,
     Write,
-    Stdout,
-    Stderr,
 }
 
-pub fn pipe() -> impl Parser<Pipe> {
-    or5(
-        "|".asv(Pipe::Bar),
-        ">>".asv(Pipe::Append),
-        ">".asv(Pipe::Write),
-        "&>".asv(Pipe::Stdout),
-        "&2>".asv(Pipe::Stderr),
+#[derive(Debug, PartialEq, Clone)]
+pub struct Pipe {
+    out: OutputType,
+    tp: PipeType,
+}
+
+pub fn output_type() -> impl Parser<OutputType> {
+    maybe("^&".one()).map(|op| match op {
+        Some('^') => OutputType::StdErr,
+        Some('&') => OutputType::Combined,
+        _ => OutputType::StdOut,
+    })
+}
+pub fn pipe_type() -> impl Parser<PipeType> {
+    or3(
+        ">>".map(|_| PipeType::Append),
+        ">".map(|_| PipeType::Write),
+        "|".map(|_| PipeType::Bar),
     )
+}
+pub fn pipe() -> impl Parser<Pipe> {
+    (output_type(), pipe_type()).map(|(out, tp)| Pipe { out, tp })
 }
 
 #[derive(Debug, PartialEq)]
