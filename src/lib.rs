@@ -1,5 +1,8 @@
 use gobble::*;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Debug)]
 pub enum Op {
     Add,
@@ -341,23 +344,4 @@ pub fn func_def() -> impl Parser<Statement> {
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
     repeat(wst(item), 1)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_string_handles_escapes_correctly() {
-        let st = quoted()
-            .parse_s(r#""there are no \n \t $("53 +4")""#)
-            .unwrap();
-        let mut it = st.into_iter();
-        assert_eq!(
-            it.next(),
-            Some(StringPart::Lit("there are no ".to_string()))
-        );
-        assert_eq!(it.next(), Some(StringPart::Esc('n')));
-        assert_eq!(it.next(), Some(StringPart::Lit(" ".to_string())));
-        assert_eq!(it.next(), Some(StringPart::Esc('t')));
-    }
 }
