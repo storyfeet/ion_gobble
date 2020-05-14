@@ -14,7 +14,12 @@ fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
 }
 
 pub fn to_end() -> impl Parser<()> {
-    skip_while(" \t", 0).then_ig(or("\n;".one().asv(()), eoi))
+    (
+        skip_while(" \t", 0),
+        maybe(("#", skip_while(Any.except(";\n"), 0))),
+        (or("\n;".one().asv(()), eoi)),
+    )
+        .map(|_| ())
 }
 
 fn ident() -> impl Parser<String> {
@@ -242,7 +247,7 @@ pub enum UnquotedPart {
 
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     or4(
-        Any.except(" \n\r()@$\\\"|&><^")
+        Any.except(" \n\r()@$\\\"|&><^#")
             .min_n(1)
             .map(|s| UnquotedPart::Lit(s)),
         quoted().map(|q| UnquotedPart::Quoted(q)),
