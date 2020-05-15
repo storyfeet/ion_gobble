@@ -1,35 +1,9 @@
 use gobble::*;
 
-mod partial;
-
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, PartialEq)]
-pub enum AssOp {
-    Assign,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Concat,
-    PreConcat,
-}
-pub fn ass_op() -> impl Parser<AssOp> {
-    or3(
-        "=".map(|_| AssOp::Assign),
-        or4(
-            "+=".map(|_| AssOp::Add),
-            "-=".map(|_| AssOp::Sub),
-            "*=".map(|_| AssOp::Mul),
-            "/=".map(|_| AssOp::Div),
-        ),
-        or(
-            "++=".map(|_| AssOp::Concat),
-            "::=".map(|_| AssOp::PreConcat),
-        ),
-    )
-}
+use crate::{ass_op, AssOp};
 
 // Util Section
 fn iws(n: usize) -> impl Parser<()> {
@@ -45,8 +19,7 @@ pub fn to_end() -> impl Parser<()> {
     (
         skip_while(" \t", 0),
         maybe(("#", skip_while(Any.except(";\n"), 0))),
-        fail_on(or(("\\", eoi), ("\\\n", eoi))),
-        or("\n;".one().asv(()), eoi),
+        (or("\n;".one().asv(()), eoi)),
     )
         .map(|_| ())
 }
@@ -79,24 +52,19 @@ pub enum Statement {
     Continue,
 }
 pub fn statement() -> impl Parser<Statement> {
-    wst(or(
-        or6(
-            let_statement(),
-            export_statement(),
-            if_statement(),
-            else_statement(),
-            loop_statement(),
-            func_def(),
-        ),
-        or6(
-            keyword("end").map(|_| Statement::End),
-            keyword("break").map(|_| Statement::Break),
-            keyword("continue").map(|_| Statement::Continue),
-            (keyword("match"), wst(item)).map(|(_, i)| Statement::Match(i)),
-            (keyword("case"), wst(item)).map(|(_, i)| Statement::Case(i)),
-            expr.map(|e| Statement::Expr(e)),
-        ),
-    ))
+    wst(let_statement()
+        .or(export_statement())
+        .or(if_statement())
+        .or(else_statement())
+        .or(loop_statement())
+        .or(func_def())
+        .or(keyword("end").map(|_| Statement::End))
+        .or(keyword("break").map(|_| Statement::Break))
+        .or(keyword("continue").map(|_| Statement::Continue))
+        .or((keyword("match"), wst(item)).map(|(_, i)| Statement::Match(i)))
+        .or((keyword("case"), wst(item)).map(|(_, i)| Statement::Case(i))))
+    .or(expr.map(|e| Statement::Expr(e)))
+    //.or(command_statement().map(|c| Statement::Command(c)))
     .then_ig(to_end())
 }
 
@@ -383,23 +351,15 @@ pub fn loop_statement() -> impl Parser<Statement> {
 
 pub fn func_def() -> impl Parser<Statement> {
     //TODO work out how function hints are written
-    keyword("fn")
-        .ig_then(or(
-            peek(to_end()).map(|_| Statement::FuncList),
-            (
-                wst(ident()).brk().map_err(|e| {
-                    println!("err {}", e);
-                    e
-                }),
-                repeat(wst(var()), 0),
-                maybe(wst("--").ig_then(Any.except("\n;").any())),
-            )
-                .map(|(nm, vars, doc)| Statement::FuncDef(nm, doc, vars)),
-        ))
-        .map_err(|e| {
-            println!("Fdef err {}", e);
-            e
-        })
+    keyword("fn").ig_then(or(
+        peek(to_end()).map(|_| Statement::FuncList),
+        (
+            wst(ident()),
+            repeat(wst(var()), 1).brk(),
+            maybe(wst("--").ig_then(Any.except("\n;").any())),
+        )
+            .map(|(nm, vars, doc)| Statement::FuncDef(nm, doc, vars)),
+    ))
 }
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
