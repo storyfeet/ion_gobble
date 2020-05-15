@@ -4,16 +4,39 @@ use gobble::*;
 mod tests;
 
 #[derive(Debug, PartialEq)]
-pub enum Op {
+pub enum AssOp {
+    Assign,
     Add,
     Sub,
+    Mul,
+    Div,
+    Concat,
+    PreConcat,
+}
+pub fn ass_op() -> impl Parser<AssOp> {
+    or3(
+        "=".map(|_| AssOp::Assign),
+        or4(
+            "+=".map(|_| AssOp::Add),
+            "-=".map(|_| AssOp::Sub),
+            "*=".map(|_| AssOp::Mul),
+            "/=".map(|_| AssOp::Div),
+        ),
+        or(
+            "++=".map(|_| AssOp::Concat),
+            "::=".map(|_| AssOp::PreConcat),
+        ),
+    )
 }
 
 // Util Section
+fn iws(n: usize) -> impl Parser<()> {
+    skip_repeat(or3(" ", "\t", "\\\n"), n)
+}
 
 fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
-    ws(0).ig_then(p)
-    //repeat(" ".or("\t").or("\\\n"), 0).ig_then(p)
+    //ws(0).ig_then(p)
+    iws(0).ig_then(p)
 }
 
 pub fn to_end() -> impl Parser<()> {
@@ -34,9 +57,9 @@ fn ident() -> impl Parser<String> {
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     LetList,
-    Let(Vec<Var>, Option<Op>, Vec<Item>),
+    Let(Vec<Var>, AssOp, Vec<Item>),
     ExportList,
-    Export(Vec<Var>, Option<Op>, Vec<Item>),
+    Export(Vec<Var>, AssOp, Vec<Item>),
     If(Expr),
     Else,
     Elif(Expr),
@@ -46,7 +69,6 @@ pub enum Statement {
     //TODO work out where ion puts func description
     FuncList,
     FuncDef(String, Option<String>, Vec<Var>),
-    //Command(Vec<Item>),
     Expr(Expr),
     Break,
     Continue,
@@ -140,13 +162,16 @@ pub enum Sub {
     DollarB(Expr),
     AtVar(String),
     AtB(Expr),
+    NameSpace(String, String),
 }
+
 pub fn sub() -> impl Parser<Sub> {
-    or4(
+    or5(
         "$(".ig_then(wst(expr))
             .then_ig(wst(")"))
             .map(|e| Sub::DollarB(e)),
         "$".ig_then(ident()).map(|i| Sub::Var(i)),
+        ("${", ident(), "::", ident(), "}").map(|(_, a, _, b, _)| Sub::NameSpace(a, b)),
         "@(".ig_then(wst(expr))
             .then_ig(wst(")"))
             .map(|e| Sub::AtB(e)),
@@ -224,20 +249,26 @@ pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
 #[derive(Debug, PartialEq)]
 pub enum StringPart {
     Lit(String),
-    Esc(char),
     Sub(Substitution),
 }
 pub fn quoted() -> impl Parser<Vec<StringPart>> {
     '"'.ig_then(repeat_until_ig(string_part(), '"'))
 }
 
+pub fn quoted_escape() -> impl Parser<String> {
+    '\\'.ig_then(or4(
+        iws(1).map(|_| String::new()),
+        't'.map(|_| '\t'.to_string()),
+        'n'.map(|_| '\n'.to_string()),
+        Any.one().map(|s| s.to_string()),
+    ))
+}
+
 pub fn string_part() -> impl Parser<StringPart> {
-    or3(
-        (|c| !("@$\"\\").char_bool(c))
-            .min_n(1)
+    or(
+        string_repeat(or(Any.except("@$\"\\").min_n(1), quoted_escape()), 1)
             .map(|s| StringPart::Lit(s)),
         substitution().map(|e| StringPart::Sub(e)),
-        "\\".ig_then(take_char).map(|c| StringPart::Esc(c)),
     )
 }
 
@@ -264,10 +295,6 @@ pub fn unquoted() -> impl Parser<Vec<UnquotedPart>> {
     repeat(unquoted_string_part(), 1)
 }
 
-pub fn op() -> impl Parser<Op> {
-    "+".map(|_| Op::Add)
-}
-
 pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
     wst(keyword("str")
         .asv(VarType::Str)
@@ -291,8 +318,7 @@ pub fn let_statement() -> impl Parser<Statement> {
     keyword("let").ig_then(
         or(
             peek(to_end()).map(|_| Statement::LetList),
-            reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
-                .map(|(a, b, c)| Statement::Let(a, b, c)),
+            reflect(wst(var()), wst(ass_op()), wst(item)).map(|(a, b, c)| Statement::Let(a, b, c)),
         )
         .brk(),
     )
@@ -302,7 +328,7 @@ pub fn export_statement() -> impl Parser<Statement> {
     keyword("export").ig_then(
         or(
             peek(to_end()).map(|_| Statement::ExportList),
-            reflect(wst(var()), wst(maybe(op()).then_ig("=")), wst(item))
+            reflect(wst(var()), wst(ass_op()), wst(item))
                 .map(|(a, b, c)| Statement::Export(a, b, c)),
         )
         .brk(),
