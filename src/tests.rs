@@ -7,11 +7,13 @@ fn test_string_handles_escapes_correctly() {
     let mut it = st.into_iter();
     assert_eq!(
         it.next(),
-        Some(StringPart::Lit("there are no ".to_string()))
+        Some(StringPart::Lit("there are no \n \t ".to_string()))
     );
-    assert_eq!(it.next(), Some(StringPart::Esc('n')));
-    assert_eq!(it.next(), Some(StringPart::Lit(" ".to_string())));
-    assert_eq!(it.next(), Some(StringPart::Esc('t')));
+    match it.next() {
+        Some(StringPart::Sub(_)) => {}
+        Some(n) => panic!("Expected sub got {:?}", n),
+        None => panic!("Ended before Sob"),
+    }
 }
 
 fn simple_item(s: &str) -> Item {
@@ -19,7 +21,7 @@ fn simple_item(s: &str) -> Item {
 }
 
 #[test]
-fn test_statements() {
+pub fn test_statements() {
     let p = statement();
     assert_eq!(
         p.parse_sn("do thing;other").unwrap(),
@@ -29,5 +31,24 @@ fn test_statements() {
                 v: vec![simple_item("do"), simple_item("thing")],
             }))
         )
+    );
+}
+
+#[test]
+fn test_ident() {
+    let p = ident();
+    assert_eq!(p.parse_sn("ident["), Ok(("[", "ident".to_string())));
+}
+
+#[test]
+fn test_index_creats_valid_range() {
+    let p = index();
+    assert_eq!(
+        p.parse_s("[3]"),
+        Ok(Index(vec![Range {
+            start: Some(RangeEnd::Int(3)),
+            fin: None,
+            op: None
+        }]))
     );
 }

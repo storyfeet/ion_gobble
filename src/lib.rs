@@ -1,6 +1,6 @@
 use gobble::*;
 
-mod partial;
+pub mod partial;
 
 #[cfg(test)]
 mod tests;
@@ -110,28 +110,63 @@ pub enum VarType {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Index {
-    Pos(Item),
-    Range(Option<Item>, Option<Item>),
-    RangeInc(Option<Item>, Option<Item>),
+pub enum RangeEnd {
+    Int(isize),
+    Sub(Substitution),
 }
 
-pub fn index() -> impl Parser<Index> {
-    "[".ig_then(
-        (wst(item))
-            .then_ig("]")
-            .map(|i| Index::Pos(i))
-            // Or do with ranges
-            .or(maybe(wst(item))
-                .then(wst("..=".or("..")))
-                .then(maybe(wst(item)))
-                .then_ig(wst("]"))
-                .map(|((l, op), r)| match op {
-                    "..=" => Index::RangeInc(l, r),
-                    ".." => Index::Range(l, r),
-                    _ => Index::Range(l, r),
-                })),
+pub fn range_end() -> impl Parser<RangeEnd> {
+    or(
+        common_int.map(|n| RangeEnd::Int(n)),
+        substitution.map(|s| RangeEnd::Sub(s)),
     )
+}
+#[derive(Debug, PartialEq)]
+pub enum RangeOp {
+    Exc,
+    Inc,
+}
+pub fn range_op() -> impl Parser<RangeOp> {
+    ("..", maybe("=")).map(|(_, e)| match e {
+        Some(_) => RangeOp::Inc,
+        None => RangeOp::Exc,
+    })
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Range {
+    start: Option<RangeEnd>,
+    fin: Option<RangeEnd>,
+    op: Option<RangeOp>,
+}
+
+pub fn range() -> impl Parser<Range> {
+    or(
+        (range_end(), maybe((range_op(), maybe(range_end())))).map(|(s, op)| match op {
+            Some((op, fin)) => Range {
+                start: Some(s),
+                fin,
+                op: Some(op),
+            },
+            None => Range {
+                start: Some(s),
+                fin: None,
+                op: None,
+            },
+        }),
+        (range_op(), range_end()).map(|(op, fin)| Range {
+            start: None,
+            fin: Some(fin),
+            op: Some(op),
+        }),
+    )
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Index(Vec<Range>);
+
+pub fn index() -> impl Parser<Index> {
+    ('[', (repeat(wst(range()), 1), wst(']')).brk()).map(|(_, (i, _))| Index(i))
 }
 
 #[derive(Debug, PartialEq)]
@@ -146,7 +181,7 @@ pub enum Item {
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     //TODO float
-    let p = substitution()
+    let p = substitution
         .map(|s| Item::Sub(Box::new(s)))
         .or(quoted().map(|q| Item::Quoted(q)))
         .or(common_bool.map(|b| Item::Bool(b)))
@@ -164,8 +199,10 @@ pub struct Substitution {
     sub: Sub,
     index: Option<Index>,
 }
-pub fn substitution() -> impl Parser<Substitution> {
-    (sub(), maybe(index())).map(|(sub, index)| Substitution { sub, index })
+pub fn substitution<'a>(it: &LCChars<'a>) -> ParseRes<'a, Substitution> {
+    (sub(), maybe(index()))
+        .map(|(sub, index)| Substitution { sub, index })
+        .parse(it)
 }
 
 #[derive(Debug, PartialEq)]
@@ -280,7 +317,7 @@ pub fn string_part() -> impl Parser<StringPart> {
     or(
         string_repeat(or(Any.except("@$\"\\").min_n(1), quoted_escape()), 1)
             .map(|s| StringPart::Lit(s)),
-        substitution().map(|e| StringPart::Sub(e)),
+        substitution.map(|e| StringPart::Sub(e)),
     )
 }
 
@@ -303,14 +340,14 @@ pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     or3(
         string_repeat(
             or(
-                Any.except(" \n\r()@$\\\"|&><^#;").min_n(1),
+                Any.except(" \n\r()@$\\\"|&><^#;[]").min_n(1),
                 unquoted_escape(),
             ),
             1,
         )
         .map(|s| UnquotedPart::Lit(s)),
         quoted().map(|q| UnquotedPart::Quoted(q)),
-        substitution().map(|e| UnquotedPart::Sub(e)),
+        substitution.map(|e| UnquotedPart::Sub(e)),
     )
 }
 
@@ -383,23 +420,16 @@ pub fn loop_statement() -> impl Parser<Statement> {
 
 pub fn func_def() -> impl Parser<Statement> {
     //TODO work out how function hints are written
-    keyword("fn")
-        .ig_then(or(
-            peek(to_end()).map(|_| Statement::FuncList),
-            (
-                wst(ident()).brk().map_err(|e| {
-                    println!("err {}", e);
-                    e
-                }),
-                repeat(wst(var()), 0),
-                maybe(wst("--").ig_then(Any.except("\n;").any())),
-            )
-                .map(|(nm, vars, doc)| Statement::FuncDef(nm, doc, vars)),
-        ))
-        .map_err(|e| {
-            println!("Fdef err {}", e);
-            e
-        })
+    keyword("fn").ig_then(or(
+        peek(to_end()).map(|_| Statement::FuncList),
+        (
+            wst(ident()),
+            repeat(wst(var()), 0),
+            maybe(wst("--").ig_then(Any.except("\n;").any())),
+        )
+            .brk()
+            .map(|(nm, vars, doc)| Statement::FuncDef(nm, doc, vars)),
+    ))
 }
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {

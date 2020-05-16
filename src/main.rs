@@ -4,6 +4,7 @@ extern crate ion_parse;
 fn main() {
     let ip = std::io::stdin();
     let p = ion_parse::statement();
+    let ppart = ion_parse::partial::statement();
     let ed = ion_parse::to_end();
     loop {
         let mut s = String::new();
@@ -21,7 +22,16 @@ fn main() {
                 }
                 Err(e) => {
                     println!("Error: {}", e);
-                    break;
+                    match ppart.parse(&it) {
+                        Ok((i2, s)) => {
+                            println!("PartialSuccess: {:?}", s);
+                            it = i2;
+                        }
+                        Err(e) => {
+                            println!("PartialError: {}", e);
+                            break;
+                        }
+                    }
                 }
             }
         }

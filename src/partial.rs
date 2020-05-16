@@ -1,25 +1,32 @@
 use gobble::*;
 
-#[cfg(test)]
-mod tests;
+use crate::{ass_op, iws, wst, AssOp};
 
-use crate::{ass_op, AssOp};
-
-// Util Section
-fn iws(n: usize) -> impl Parser<()> {
-    skip_repeat(or3(" ", "\t", "\\\n"), n)
+pub struct IOr<V> {
+    pub start: Option<usize>,
+    pub fin: Option<usize>,
+    pub v: Option<V>,
 }
 
-fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
-    //ws(0).ig_then(p)
-    iws(0).ig_then(p)
+pub fn or_end<P: Parser<V>, V>(p: P) -> impl Parser<IOr<V>> {
+    (
+        gobble::index,
+        or(to_end().map(|_| None), p.map(|v| Some(v))),
+        gobble::index,
+    )
+        .map(|(start, v, fin)| IOr { start, v, fin })
+}
+
+pub fn wst_oe<P: Parser<V>, V>(p: P) -> impl Parser<IOr<V>> {
+    wst(or_end(p))
 }
 
 pub fn to_end() -> impl Parser<()> {
     (
         skip_while(" \t", 0),
         maybe(("#", skip_while(Any.except(";\n"), 0))),
-        (or("\n;".one().asv(()), eoi)),
+        fail_on((or("\\\n", "\\"), eoi)),
+        or("\n;".one().asv(()), eoi),
     )
         .map(|_| ())
 }
@@ -52,19 +59,24 @@ pub enum Statement {
     Continue,
 }
 pub fn statement() -> impl Parser<Statement> {
-    wst(let_statement()
-        .or(export_statement())
-        .or(if_statement())
-        .or(else_statement())
-        .or(loop_statement())
-        .or(func_def())
-        .or(keyword("end").map(|_| Statement::End))
-        .or(keyword("break").map(|_| Statement::Break))
-        .or(keyword("continue").map(|_| Statement::Continue))
-        .or((keyword("match"), wst(item)).map(|(_, i)| Statement::Match(i)))
-        .or((keyword("case"), wst(item)).map(|(_, i)| Statement::Case(i))))
-    .or(expr.map(|e| Statement::Expr(e)))
-    //.or(command_statement().map(|c| Statement::Command(c)))
+    wst(or(
+        or6(
+            let_statement(),
+            export_statement(),
+            if_statement(),
+            else_statement(),
+            loop_statement(),
+            func_def(),
+        ),
+        or6(
+            keyword("end").map(|_| Statement::End),
+            keyword("break").map(|_| Statement::Break),
+            keyword("continue").map(|_| Statement::Continue),
+            (keyword("match"), wst(item)).map(|(_, i)| Statement::Match(i)),
+            (keyword("case"), wst(item)).map(|(_, i)| Statement::Case(i)),
+            expr.map(|e| Statement::Expr(e)),
+        ),
+    ))
     .then_ig(to_end())
 }
 
@@ -355,9 +367,10 @@ pub fn func_def() -> impl Parser<Statement> {
         peek(to_end()).map(|_| Statement::FuncList),
         (
             wst(ident()),
-            repeat(wst(var()), 1).brk(),
+            repeat(wst(var()), 0),
             maybe(wst("--").ig_then(Any.except("\n;").any())),
         )
+            .brk()
             .map(|(nm, vars, doc)| Statement::FuncDef(nm, doc, vars)),
     ))
 }
