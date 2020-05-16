@@ -43,12 +43,33 @@ fn test_ident() {
 #[test]
 fn test_index_creats_valid_range() {
     let p = index();
+    let r1 = Range {
+        start: Some(RangeEnd::Int(3)),
+        fin: None,
+        op: None,
+    };
+    let r2 = Range {
+        start: None,
+        op: Some(RangeOp::Inc),
+        fin: Some(RangeEnd::Int(4)),
+    };
+    let r3 = Range {
+        start: Some(RangeEnd::Sub(Substitution {
+            sub: Sub::Var("hello".to_string()),
+            index: None,
+        })),
+        op: Some(RangeOp::Exc),
+        fin: Some(RangeEnd::Int(8)),
+    };
+
+    assert_eq!(p.parse_s("[3]"), Ok(Index(vec![r1.clone()])));
+
     assert_eq!(
-        p.parse_s("[3]"),
-        Ok(Index(vec![Range {
-            start: Some(RangeEnd::Int(3)),
-            fin: None,
-            op: None
-        }]))
+        p.parse_s("[3 ..=4]").unwrap(),
+        Index(vec![r1.clone(), r2.clone()])
+    );
+    assert_eq!(
+        p.parse_s("[$hello..8 3]").unwrap(),
+        Index(vec![r3.clone(), r1.clone()]),
     );
 }

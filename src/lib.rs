@@ -5,7 +5,7 @@ pub mod partial;
 #[cfg(test)]
 mod tests;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum AssOp {
     Assign,
     Add,
@@ -33,7 +33,7 @@ pub fn ass_op() -> impl Parser<AssOp> {
 
 // Util Section
 fn iws(n: usize) -> impl Parser<()> {
-    skip_repeat(or3(" ", "\t", "\\\n"), n)
+    skip_repeat(or4(" ", "\t", "\\\n", "\\;"), n)
 }
 
 fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
@@ -43,12 +43,18 @@ fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
 
 pub fn to_end() -> impl Parser<()> {
     (
-        skip_while(" \t", 0),
-        maybe(("#", skip_while(Any.except(";\n"), 0))),
-        fail_on(or(("\\", eoi), ("\\\n", eoi))),
+        skip_repeat(
+            or4(
+                ("\\\n", fail_on(eoi)).asv(()),
+                ("\\;", maybe('\n'), fail_on(eoi)).asv(()), //escape ; for easier tests
+                " \t".min_n(1).asv(()),
+                ("#", skip_while(Any.except(";\n"), 0)).asv(()),
+            ),
+            0,
+        ),
         or("\n;".one().asv(()), eoi),
     )
-        .map(|_| ())
+        .asv(())
 }
 
 fn ident() -> impl Parser<String> {
@@ -57,7 +63,7 @@ fn ident() -> impl Parser<String> {
 
 //Main Code
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     LetList,
     Let(Vec<Var>, AssOp, Vec<Item>),
@@ -109,7 +115,7 @@ pub enum VarType {
     Arr(Box<VarType>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum RangeEnd {
     Int(isize),
     Sub(Substitution),
@@ -121,7 +127,7 @@ pub fn range_end() -> impl Parser<RangeEnd> {
         substitution.map(|s| RangeEnd::Sub(s)),
     )
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum RangeOp {
     Exc,
     Inc,
@@ -133,7 +139,7 @@ pub fn range_op() -> impl Parser<RangeOp> {
     })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Range {
     start: Option<RangeEnd>,
     fin: Option<RangeEnd>,
@@ -162,14 +168,14 @@ pub fn range() -> impl Parser<Range> {
     )
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Index(Vec<Range>);
 
 pub fn index() -> impl Parser<Index> {
     ('[', (repeat(wst(range()), 1), wst(']')).brk()).map(|(_, (i, _))| Index(i))
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Item {
     Bool(bool),
     Int(isize),
@@ -194,7 +200,7 @@ pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     p.parse(it)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Substitution {
     sub: Sub,
     index: Option<Index>,
@@ -205,7 +211,7 @@ pub fn substitution<'a>(it: &LCChars<'a>) -> ParseRes<'a, Substitution> {
         .parse(it)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Sub {
     Var(String),
     DollarB(Expr),
@@ -228,13 +234,13 @@ pub fn sub() -> impl Parser<Sub> {
     )
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Var {
     name: String,
     vtype: Option<VarType>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Command {
     v: Vec<Item>,
 }
@@ -270,6 +276,7 @@ pub fn output_type() -> impl Parser<OutputType> {
         _ => OutputType::StdOut,
     })
 }
+
 pub fn pipe_type() -> impl Parser<PipeType> {
     or3(
         ">>".map(|_| PipeType::Append),
@@ -281,7 +288,7 @@ pub fn pipe() -> impl Parser<Pipe> {
     (output_type(), pipe_type()).map(|(out, tp)| Pipe { out, tp })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Command(Command),
     Pipe(Pipe, Box<Command>, Box<Expr>),
@@ -295,11 +302,12 @@ pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, Expr> {
         .parse(it)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum StringPart {
     Lit(String),
     Sub(Substitution),
 }
+
 pub fn quoted() -> impl Parser<Vec<StringPart>> {
     '"'.ig_then(repeat_until_ig(string_part(), '"'))
 }
@@ -321,7 +329,7 @@ pub fn string_part() -> impl Parser<StringPart> {
     )
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum UnquotedPart {
     Lit(String),
     Sub(Substitution),

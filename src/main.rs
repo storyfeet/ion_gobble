@@ -17,22 +17,20 @@ fn main() {
             }
             match p.parse(&it) {
                 Ok((i2, s)) => {
-                    println!("{:?}", s);
+                    println!("{:?}\n", s);
                     it = i2;
                 }
-                Err(e) => {
-                    println!("Error: {}", e);
-                    match ppart.parse(&it) {
-                        Ok((i2, s)) => {
-                            println!("PartialSuccess: {:?}", s);
-                            it = i2;
-                        }
-                        Err(e) => {
-                            println!("PartialError: {}", e);
-                            break;
-                        }
+                Err(e) => match ppart.parse(&it) {
+                    Ok((i2, s)) => {
+                        println!("PartialSuccess: {:?}\n", s);
+                        it = i2;
                     }
-                }
+                    Err(pe) => {
+                        println!("Error: {}\n\n", e);
+                        println!("PartialError: {}\n", pe);
+                        break;
+                    }
+                },
             }
         }
     }
