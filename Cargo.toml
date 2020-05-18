@@ -16,3 +16,4 @@ path="src/main.rs"
 #gobble= "0.1.4"
 gobble = {git="https://github.com/storyfeet/gobble"}
 #gobble = {path="../gobble/"}
+termion = "1.5.5"

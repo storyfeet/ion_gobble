@@ -9,6 +9,16 @@ pub struct EOr<V> {
     pub v: Option<V>,
 }
 
+pub fn err_end() -> impl Parser<EOr<()>> {
+    e_or(
+        (
+            skip_while(Any.except("\n;"), 1),
+            or(";\n".one().asv(()), eoi),
+        )
+            .asv(()),
+    )
+}
+
 pub fn e_or<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
     (
         gobble::index,
@@ -20,6 +30,10 @@ pub fn e_or<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
 
 pub fn wst_eor<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
     wst(e_or(p))
+}
+
+pub fn eor_word<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
+    e_or(keyword(p))
 }
 
 pub fn to_end() -> impl Parser<()> {
@@ -41,10 +55,20 @@ pub fn to_end() -> impl Parser<()> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum PStatement {
-    LetList,
-    Let(Vec<EOr<PVar>>, EOr<AssOp>, Vec<EOr<Item>>),
-    ExportList,
-    Export(Vec<EOr<PVar>>, EOr<AssOp>, Vec<EOr<Item>>),
+    LetList(EOr<&'static str>),
+    Let(
+        EOr<&'static str>,
+        Vec<EOr<PVar>>,
+        EOr<AssOp>,
+        Vec<EOr<Item>>,
+    ),
+    ExportList(EOr<&'static str>),
+    Export(
+        EOr<&'static str>,
+        Vec<EOr<PVar>>,
+        EOr<AssOp>,
+        Vec<EOr<Item>>,
+    ),
     If(EOr<PExpr>),
     Else,
     Elif(EOr<PExpr>),
@@ -359,24 +383,24 @@ pub fn var() -> impl Parser<PVar> {
 }
 
 pub fn let_statement() -> impl Parser<PStatement> {
-    keyword("let").ig_then(
-        or(
-            peek(to_end()).map(|_| PStatement::LetList),
-            reflect(wst_eor(var()), wst_eor(ass_op()), wst_eor(item))
-                .map(|(a, b, c)| PStatement::Let(a, b, c)),
+    or(
+        (eor_word("let"), peek(to_end())).map(|(e, _)| PStatement::LetList(e)),
+        (
+            eor_word("let"),
+            reflect(wst_eor(var()), wst_eor(ass_op()), wst_eor(item)).brk(),
         )
-        .brk(),
+            .map(|(l, (a, b, c))| PStatement::Let(l, a, b, c)),
     )
 }
 
 pub fn export_statement() -> impl Parser<PStatement> {
-    keyword("export").ig_then(
-        or(
-            peek(to_end()).map(|_| PStatement::ExportList),
-            reflect(wst_eor(var()), wst_eor(ass_op()), wst_eor(item))
-                .map(|(a, b, c)| PStatement::Export(a, b, c)),
+    or(
+        (eor_word("export"), peek(to_end())).map(|(e, _)| PStatement::ExportList(e)),
+        (
+            eor_word("export"),
+            reflect(wst_eor(var()), wst_eor(ass_op()), wst_eor(item)).brk(),
         )
-        .brk(),
+            .map(|(l, (a, b, c))| PStatement::Export(l, a, b, c)),
     )
 }
 
@@ -411,7 +435,7 @@ pub fn func_def() -> impl Parser<PStatement> {
         peek(to_end()).map(|_| PStatement::FuncList),
         (
             wst_eor(ident()),
-            repeat(wst_eor(var()), 0),
+            repeat_until_ig(wst_eor(var()), to_end()),
             e_or(maybe(wst_eor("--").ig_then(Any.except("\n;").any()))),
         )
             .brk()

@@ -1,5 +1,6 @@
 use gobble::*;
 
+pub mod color;
 pub mod partial;
 
 #[cfg(test)]
