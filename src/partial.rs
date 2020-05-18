@@ -2,6 +2,8 @@ use gobble::*;
 
 use crate::{ass_op, ident, iws, wst, AssOp};
 
+pub type Kw = EOr<&'static str>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EOr<V> {
     pub start: Option<usize>,
@@ -56,33 +58,23 @@ pub fn to_end() -> impl Parser<()> {
 #[derive(Debug, PartialEq, Clone)]
 pub enum PStatement {
     LetList(EOr<&'static str>),
-    Let(
-        EOr<&'static str>,
-        Vec<EOr<PVar>>,
-        EOr<AssOp>,
-        Vec<EOr<Item>>,
-    ),
+    Let(Kw, Vec<EOr<PVar>>, EOr<AssOp>, Vec<EOr<Item>>),
     ExportList(EOr<&'static str>),
-    Export(
-        EOr<&'static str>,
-        Vec<EOr<PVar>>,
-        EOr<AssOp>,
-        Vec<EOr<Item>>,
-    ),
-    If(EOr<PExpr>),
-    Else,
-    Elif(EOr<PExpr>),
-    End,
-    While(EOr<PExpr>),
-    For(Vec<EOr<PVar>>, EOr<PExpr>),
-    Match(EOr<Item>),
-    Case(EOr<Item>),
+    Export(Kw, Vec<EOr<PVar>>, EOr<AssOp>, Vec<EOr<Item>>),
+    If(Kw, EOr<PExpr>),
+    Else(Kw),
+    Elif(Kw, EOr<PExpr>),
+    End(Kw),
+    While(Kw, EOr<PExpr>),
+    For(Kw, Vec<EOr<PVar>>, Kw, EOr<PExpr>),
+    Match(Kw, EOr<Item>),
+    Case(Kw, EOr<Item>),
     //TODO work out where ion puts func description
-    FuncList,
-    FuncDef(EOr<String>, EOr<Option<String>>, Vec<EOr<PVar>>),
+    FuncList(Kw),
+    FuncDef(Kw, EOr<String>, Option<EOr<String>>, Vec<EOr<PVar>>),
     Expr(EOr<PExpr>),
-    Break,
-    Continue,
+    Break(Kw),
+    Continue(Kw),
 }
 pub fn statement() -> impl Parser<PStatement> {
     wst(or(
@@ -95,11 +87,11 @@ pub fn statement() -> impl Parser<PStatement> {
             func_def(),
         ),
         or6(
-            keyword("end").map(|_| PStatement::End),
-            keyword("break").map(|_| PStatement::Break),
-            keyword("continue").map(|_| PStatement::Continue),
-            (keyword("match"), wst_eor(item)).map(|(_, i)| PStatement::Match(i)),
-            (keyword("case"), wst_eor(item)).map(|(_, i)| PStatement::Case(i)),
+            eor_word("end").map(|e| PStatement::End(e)),
+            eor_word("break").map(|e| PStatement::Break(e)),
+            eor_word("continue").map(|e| PStatement::Continue(e)),
+            (eor_word("match"), wst_eor(item)).map(|(kw, i)| PStatement::Match(kw, i)),
+            (eor_word("case"), wst_eor(item)).map(|(kw, i)| PStatement::Case(kw, i)),
             e_or(expr).map(|e| PStatement::Expr(e)),
         ),
     ))
@@ -405,42 +397,46 @@ pub fn export_statement() -> impl Parser<PStatement> {
 }
 
 pub fn if_statement() -> impl Parser<PStatement> {
-    keyword("if")
-        .ig_then(e_or(expr.brk()))
-        .map(|e| PStatement::If(e))
+    (eor_word("if"), e_or(expr.brk())).map(|(kw, e)| PStatement::If(kw, e))
 }
 
 pub fn else_statement() -> impl Parser<PStatement> {
-    keyword("else").map(|_| PStatement::Else).or(keyword("elif")
-        .ig_then(e_or(expr.brk()))
-        .map(|e| PStatement::Elif(e)))
+    or(
+        eor_word("else").map(|e| PStatement::Else(e)),
+        (eor_word("elif"), e_or(expr.brk())).map(|(kw, e)| PStatement::Elif(kw, e)),
+    )
 }
 
 pub fn loop_statement() -> impl Parser<PStatement> {
-    keyword("for")
-        .ig_then(
-            repeat_until_ig(wst_eor(var()), wst_eor(keyword("in")))
-                .then(wst_eor(expr))
+    or(
+        (
+            eor_word("for"),
+            (
+                repeat_until(wst_eor(var()), wst_eor(keyword("in"))),
+                wst_eor(expr),
+            )
                 .brk(),
         )
-        .map(|(vars, ex)| PStatement::For(vars, ex))
-        .or(keyword("while")
-            .ig_then(e_or(expr.brk()))
-            .map(|ex| PStatement::While(ex)))
+            .map(|(fk, ((vars, ik), ex))| PStatement::For(fk, vars, ik, ex)),
+        (eor_word("while"), e_or(expr.brk())).map(|(kw, ex)| PStatement::While(kw, ex)),
+    )
 }
 
 pub fn func_def() -> impl Parser<PStatement> {
     //TODO work out how function hints are written
-    keyword("fn").ig_then(or(
-        peek(to_end()).map(|_| PStatement::FuncList),
+    or(
+        (eor_word("fn"), peek(to_end())).map(|(kw, _)| PStatement::FuncList(kw)),
         (
-            wst_eor(ident()),
-            repeat_until_ig(wst_eor(var()), to_end()),
-            e_or(maybe(wst_eor("--").ig_then(Any.except("\n;").any()))),
+            eor_word("fn"),
+            (
+                wst_eor(ident()),
+                repeat_until_ig(wst_eor(var()), or(peek(wst("-").asv(())), to_end())),
+                maybe(e_or(wst("--").ig_then(Any.except("\n;").any()))),
+            )
+                .brk(),
         )
-            .brk()
-            .map(|(nm, vars, doc)| PStatement::FuncDef(nm, doc, vars)),
-    ))
+            .map(|(kw, (nm, vars, doc))| PStatement::FuncDef(kw, nm, doc, vars)),
+    )
 }
 
 pub fn command_statement() -> impl Parser<Vec<Item>> {
