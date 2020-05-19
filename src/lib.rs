@@ -183,14 +183,14 @@ pub enum Item {
     Float(f64),
     Str(Vec<UnquotedPart>),
     Array(Vec<Item>),
-    Quoted(Vec<StringPart>),
+    //Quoted(Vec<StringPart>),
     Sub(Box<Substitution>),
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     //TODO float
     let p = substitution
         .map(|s| Item::Sub(Box::new(s)))
-        .or(quoted().map(|q| Item::Quoted(q)))
+        //   .or(quoted().map(|q| Item::Quoted(q)))
         .or(common_bool.map(|b| Item::Bool(b)))
         .or("["
             .ig_then(repeat_until_ig(wst(item), wst("]")))

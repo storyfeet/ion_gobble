@@ -89,8 +89,34 @@ pub fn col_statement(s: &PStatement, cmap: &mut BTreeMap<usize, SType>) {
             ins_eor(cmap, it, SType::Var);
         }
         PStatement::Expr(e) => {
-            ins_eor(cmap, e, SType::Reset);
+            col_expr(e, cmap);
         }
+    }
+}
+
+pub fn col_expr(e: &PExpr, cmap: &mut BTreeMap<usize, SType>) {
+    match e {
+        PExpr::Command(c) => {
+            for i in &c.v {
+                col_item(i, cmap);
+            }
+        }
+        PExpr::Pipe(p, c, expr) => {
+            for i in &c.v {
+                col_item(i, cmap);
+            }
+            ins_eor(cmap, p, SType::Op);
+            col_expr(expr, cmap);
+        }
+    }
+}
+
+pub fn col_item(i: &Item, cmap: &mut BTreeMap<usize, SType>) {
+    match i {
+        Item::Bool(b) => {
+            ins_eor(cmap, b, SType::Lit);
+        }
+        _ => {}
     }
 }
 

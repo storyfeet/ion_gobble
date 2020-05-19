@@ -21,6 +21,14 @@ pub fn err_end() -> impl Parser<EOr<()>> {
     )
 }
 
+pub fn locate<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
+    (gobble::index, p, gobble::index).map(|(start, v, fin)| EOr {
+        start,
+        v: Some(v),
+        fin,
+    })
+}
+
 pub fn e_or<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
     (
         gobble::index,
@@ -81,7 +89,7 @@ pub enum PStatement {
     //TODO work out where ion puts func description
     FuncList(Kw),
     FuncDef(Kw, EOr<String>, Option<EOr<String>>, Vec<EOr<PVar>>),
-    Expr(EOr<PExpr>),
+    Expr(PExpr),
     Break(Kw),
     Continue(Kw),
 }
@@ -101,7 +109,7 @@ pub fn statement() -> impl Parser<PStatement> {
             eor_word("continue").map(|e| PStatement::Continue(e)),
             (eor_word("match"), wst_eor(item)).map(|(kw, i)| PStatement::Match(kw, i)),
             (eor_word("case"), wst_eor(item)).map(|(kw, i)| PStatement::Case(kw, i)),
-            e_or(expr).map(|e| PStatement::Expr(e)),
+            expr.map(|e| PStatement::Expr(e)),
         ),
     ))
     .then_ig(to_end())
@@ -178,25 +186,23 @@ pub fn index() -> impl Parser<Index> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Item {
-    Bool(bool),
-    Int(isize),
-    Float(f64),
+    Bool(EOr<bool>),
+    Int(EOr<isize>),
+    Float(EOr<f64>),
     Str(Vec<UnquotedPart>),
-    Array(Vec<Item>),
-    Quoted(Vec<StringPart>),
+    Array(Kw, Vec<EOr<Item>>, Kw),
     Sub(Box<Substitution>),
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     //TODO float
     let p = substitution
         .map(|s| Item::Sub(Box::new(s)))
-        .or(quoted().map(|q| Item::Quoted(q)))
-        .or(common_bool.map(|b| Item::Bool(b)))
-        .or("["
-            .ig_then(repeat_until_ig(wst(item), wst("]")))
-            .map(|l| Item::Array(l)))
-        .or(common_float.map(|f| Item::Float(f)))
-        .or(common_int.map(|n| Item::Int(n)))
+        .or(locate(common_bool).map(|b| Item::Bool(b)))
+        .or(locate("[")
+            .then(repeat_until(wst(e_or(item)), wst(locate("]"))))
+            .map(|(s, (l, e))| Item::Array(s, l, e)))
+        .or(locate(common_float).map(|f| Item::Float(f)))
+        .or(locate(common_int).map(|n| Item::Int(n)))
         .or(unquoted().map(|i| Item::Str(i)));
     p.parse(it)
 }
@@ -243,7 +249,7 @@ pub struct PVar {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Command {
-    v: Vec<Item>,
+    pub v: Vec<Item>,
 }
 
 pub fn command() -> impl Parser<Command> {
@@ -292,10 +298,10 @@ pub fn pipe() -> impl Parser<Pipe> {
 #[derive(Debug, PartialEq, Clone)]
 pub enum PExpr {
     Command(Command),
-    Pipe(Pipe, Box<Command>, Box<EOr<PExpr>>),
+    Pipe(EOr<Pipe>, Box<Command>, Box<PExpr>),
 }
 pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, PExpr> {
-    (command(), maybe((wst(pipe()), e_or(expr))))
+    (command(), maybe((wst(locate(pipe())), expr)))
         .map(|(l, popt)| match popt {
             Some((p, r)) => PExpr::Pipe(p, Box::new(l), Box::new(r)),
             None => PExpr::Command(l),
