@@ -42,7 +42,7 @@ fn wst<A: Parser<AV>, AV>(p: A) -> impl Parser<AV> {
     iws(0).ig_then(p)
 }
 
-pub fn to_end() -> impl Parser<()> {
+pub fn to_end() -> impl Parser<char> {
     (
         skip_repeat(
             or4(
@@ -53,9 +53,9 @@ pub fn to_end() -> impl Parser<()> {
             ),
             0,
         ),
-        or("\n;".one().asv(()), eoi),
+        or("\n;".one(), eoi.asv('_')),
     )
-        .asv(())
+        .map(|(_, c)| c)
 }
 
 fn ident() -> impl Parser<String> {

@@ -24,7 +24,16 @@ pub fn err_end() -> impl Parser<EOr<()>> {
 pub fn e_or<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
     (
         gobble::index,
-        or(to_end().map(|_| None), p.map(|v| Some(v))),
+        or(
+            peek(to_end().try_map(|c| {
+                if c == '_' {
+                    Ok(None)
+                } else {
+                    Err(ECode::SMess("partial ending on ; or \\n"))
+                }
+            })),
+            p.map(|v| Some(v)),
+        ),
         gobble::index,
     )
         .map(|(start, v, fin)| EOr { start, v, fin })
@@ -38,7 +47,7 @@ pub fn eor_word<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
     e_or(keyword(p))
 }
 
-pub fn to_end() -> impl Parser<()> {
+pub fn to_end() -> impl Parser<char> {
     (
         skip_repeat(
             or3(
@@ -48,9 +57,9 @@ pub fn to_end() -> impl Parser<()> {
             ),
             0,
         ),
-        or("\n;".one().asv(()), eoi),
+        or("\n;".one(), eoi.asv('_')),
     )
-        .map(|_| ())
+        .map(|(_, e)| e)
 }
 
 //Main Code
@@ -430,7 +439,7 @@ pub fn func_def() -> impl Parser<PStatement> {
             eor_word("fn"),
             (
                 wst_eor(ident()),
-                repeat_until_ig(wst_eor(var()), or(peek(wst("-").asv(())), to_end())),
+                repeat_until_ig(wst_eor(var()), or(peek(wst('-')), to_end())),
                 maybe(e_or(wst("--").ig_then(Any.except("\n;").any()))),
             )
                 .brk(),
