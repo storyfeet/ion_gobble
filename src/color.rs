@@ -59,7 +59,10 @@ pub fn col_statement(s: &PStatement, cmap: &mut BTreeMap<usize, SType>) {
             }
             ins_eor(cmap, assop, SType::Op);
             for i in items {
-                ins_eor(cmap, i, SType::Var);
+                if let Some(v) = &i.v {
+                    col_item(v, cmap);
+                }
+                //ins_eor(cmap, i, SType::Var);
             }
         }
         PStatement::Elif(kw, ex) | PStatement::If(kw, ex) | PStatement::While(kw, ex) => {
@@ -116,7 +119,44 @@ pub fn col_item(i: &Item, cmap: &mut BTreeMap<usize, SType>) {
         Item::Bool(b) => {
             ins_eor(cmap, b, SType::Lit);
         }
-        _ => {}
+        Item::Float(f) => {
+            ins_eor(cmap, f, SType::Lit);
+        }
+        Item::Int(i) => {
+            ins_eor(cmap, i, SType::Lit);
+        }
+        Item::Array(s, it, f) => {
+            ins_eor(cmap, s, SType::Op);
+            for i in it {
+                col_item(i, cmap);
+            }
+            ins_eor(cmap, f, SType::Op);
+        }
+        Item::Str(pts) => {
+            for p in pts {
+                match &p.v {
+                    Some(UnquotedPart::Quoted(s, q, f)) => {
+                        ins_eor(cmap, s, SType::Lit);
+                        for qp in q {
+                            col_quoted(qp, cmap);
+                        }
+
+                        ins_eor(cmap, f, SType::Lit);
+                    }
+                    Some(UnquotedPart::Lit(l)) => {
+                        ins_eor(cmap, l, SType::Reset);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+pub fn col_quoted(sp: &StringPart, cmap: &mut BTreeMap<usize, SType>) {
+    match sp {
+        StringPart::Lit(l) => ins_eor(cmap, l, SType::Var),
+        StringPart::Sub(_) => {}
     }
 }
 

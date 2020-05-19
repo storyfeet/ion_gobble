@@ -189,14 +189,14 @@ pub enum Item {
     Bool(EOr<bool>),
     Int(EOr<isize>),
     Float(EOr<f64>),
-    Str(Vec<UnquotedPart>),
-    Array(Kw, Vec<EOr<Item>>, Kw),
+    Str(Vec<EOr<UnquotedPart>>),
+    Array(Kw, Vec<Item>, Kw),
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     //TODO float
     let p = or5(
         locate(common_bool).map(|b| Item::Bool(b)),
-        (locate("["), repeat_until(wst(e_or(item)), wst(locate("]"))))
+        (locate("["), repeat_until(wst(item), wst(e_or("]"))))
             .map(|(s, (l, e))| Item::Array(s, l, e)),
         locate(common_float).map(|f| Item::Float(f)),
         locate(common_int).map(|n| Item::Int(n)),
@@ -309,12 +309,14 @@ pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, PExpr> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum StringPart {
-    Lit(String),
+    Lit(EOr<String>),
     Sub(Substitution),
 }
 
-pub fn quoted() -> impl Parser<Vec<StringPart>> {
-    '"'.ig_then(repeat_until_ig(string_part(), '"'))
+pub fn quoted() -> impl Parser<(Kw, Vec<StringPart>, Kw)> {
+    locate("\"")
+        .then(repeat_until(string_part(), e_or("\"")))
+        .map(|(s, (m, f))| (s, m, f))
 }
 
 pub fn quoted_escape() -> impl Parser<String> {
@@ -328,17 +330,20 @@ pub fn quoted_escape() -> impl Parser<String> {
 
 pub fn string_part() -> impl Parser<StringPart> {
     or(
-        string_repeat(or(Any.except("@$\"\\").min_n(1), quoted_escape()), 1)
-            .map(|s| StringPart::Lit(s)),
+        locate(string_repeat(
+            or(Any.except("@$\"\\").min_n(1), quoted_escape()),
+            1,
+        ))
+        .map(|s| StringPart::Lit(s)),
         substitution.map(|e| StringPart::Sub(e)),
     )
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum UnquotedPart {
-    Lit(String),
+    Lit(EOr<String>),
     Sub(Substitution),
-    Quoted(Vec<StringPart>),
+    Quoted(Kw, Vec<StringPart>, Kw),
 }
 
 pub fn unquoted_escape() -> impl Parser<String> {
@@ -351,21 +356,21 @@ pub fn unquoted_escape() -> impl Parser<String> {
 }
 pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     or3(
-        string_repeat(
+        locate(string_repeat(
             or(
                 Any.except(" \n\r()@$\\\"|&><^#;[]").min_n(1),
                 unquoted_escape(),
             ),
             1,
-        )
+        ))
         .map(|s| UnquotedPart::Lit(s)),
-        quoted().map(|q| UnquotedPart::Quoted(q)),
+        quoted().map(|(s, q, f)| UnquotedPart::Quoted(s, q, f)),
         substitution.map(|e| UnquotedPart::Sub(e)),
     )
 }
 
-pub fn unquoted() -> impl Parser<Vec<UnquotedPart>> {
-    repeat(unquoted_string_part(), 1)
+pub fn unquoted() -> impl Parser<Vec<EOr<UnquotedPart>>> {
+    repeat(locate(unquoted_string_part()), 1)
 }
 
 pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
