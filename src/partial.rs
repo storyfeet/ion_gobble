@@ -191,19 +191,17 @@ pub enum Item {
     Float(EOr<f64>),
     Str(Vec<UnquotedPart>),
     Array(Kw, Vec<EOr<Item>>, Kw),
-    Sub(Box<Substitution>),
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     //TODO float
-    let p = substitution
-        .map(|s| Item::Sub(Box::new(s)))
-        .or(locate(common_bool).map(|b| Item::Bool(b)))
-        .or(locate("[")
-            .then(repeat_until(wst(e_or(item)), wst(locate("]"))))
-            .map(|(s, (l, e))| Item::Array(s, l, e)))
-        .or(locate(common_float).map(|f| Item::Float(f)))
-        .or(locate(common_int).map(|n| Item::Int(n)))
-        .or(unquoted().map(|i| Item::Str(i)));
+    let p = or5(
+        locate(common_bool).map(|b| Item::Bool(b)),
+        (locate("["), repeat_until(wst(e_or(item)), wst(locate("]"))))
+            .map(|(s, (l, e))| Item::Array(s, l, e)),
+        locate(common_float).map(|f| Item::Float(f)),
+        locate(common_int).map(|n| Item::Int(n)),
+        unquoted().map(|i| Item::Str(i)),
+    );
     p.parse(it)
 }
 
