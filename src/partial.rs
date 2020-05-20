@@ -2,17 +2,19 @@ use gobble::*;
 
 use crate::{ass_op, ident, iws, wst, AssOp};
 
-pub type Kw = EOr<&'static str>;
+pub type Kw = Loc<&'static str>;
+pub type OKw = OLoc<&'static str>;
+pub type OLoc<V> = Option<Loc<V>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct EOr<V> {
+pub struct Loc<V> {
     pub start: Option<usize>,
     pub fin: Option<usize>,
-    pub v: Option<V>,
+    pub v: V,
 }
 
-pub fn err_end() -> impl Parser<EOr<()>> {
-    e_or(
+pub fn err_end() -> impl Parser<OLoc<()>> {
+    o_loc(
         (
             skip_while(Any.except("\n;"), 1),
             or(";\n".one().asv(()), eoi),
@@ -21,38 +23,29 @@ pub fn err_end() -> impl Parser<EOr<()>> {
     )
 }
 
-pub fn locate<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
-    (gobble::index, p, gobble::index).map(|(start, v, fin)| EOr {
-        start,
-        v: Some(v),
-        fin,
-    })
+pub fn locate<P: Parser<V>, V>(p: P) -> impl Parser<Loc<V>> {
+    (gobble::index, p, gobble::index).map(|(start, v, fin)| Loc { start, v: v, fin })
 }
 
-pub fn e_or<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
-    (
-        gobble::index,
-        or(
-            peek(to_end().try_map(|c| {
-                if c == '_' {
-                    Ok(None)
-                } else {
-                    Err(ECode::SMess("partial ending on ; or \\n"))
-                }
-            })),
-            p.map(|v| Some(v)),
-        ),
-        gobble::index,
+pub fn l_word<P: Parser<V>, V>(p: P) -> impl Parser<Loc<V>> {
+    locate(keyword(p))
+}
+
+pub fn ol_word<P: Parser<V>, V>(p: P) -> impl Parser<OLoc<V>> {
+    o_loc(keyword(p))
+}
+
+pub fn o_loc<P: Parser<V>, V>(p: P) -> impl Parser<OLoc<V>> {
+    or(
+        peek(to_end().try_map(|c| {
+            if c == '_' {
+                Ok(None)
+            } else {
+                Err(ECode::SMess("partial ending on ; or \\n"))
+            }
+        })),
+        locate(p).map(|v| Some(v)),
     )
-        .map(|(start, v, fin)| EOr { start, v, fin })
-}
-
-pub fn wst_eor<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
-    wst(e_or(p))
-}
-
-pub fn eor_word<P: Parser<V>, V>(p: P) -> impl Parser<EOr<V>> {
-    e_or(keyword(p))
 }
 
 pub fn to_end() -> impl Parser<char> {
@@ -74,41 +67,42 @@ pub fn to_end() -> impl Parser<char> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum PStatement {
-    LetList(EOr<&'static str>),
-    Let(Kw, Vec<EOr<PVar>>, EOr<AssOp>, Vec<EOr<Item>>),
-    ExportList(EOr<&'static str>),
-    Export(Kw, Vec<EOr<PVar>>, EOr<AssOp>, Vec<EOr<Item>>),
-    If(Kw, EOr<PExpr>),
+    LetList(Loc<&'static str>),
+    Let(Kw, Vec<Loc<PVar>>, OLoc<AssOp>, Vec<OLoc<Item>>),
+    ExportList(Loc<&'static str>),
+    Export(Kw, Vec<Loc<PVar>>, OLoc<AssOp>, Vec<OLoc<Item>>),
+    If(Kw, OLoc<PExpr>),
     Else(Kw),
-    Elif(Kw, EOr<PExpr>),
+    Elif(Kw, OLoc<PExpr>),
     End(Kw),
-    While(Kw, EOr<PExpr>),
-    For(Kw, Vec<EOr<PVar>>, Kw, EOr<PExpr>),
-    Match(Kw, EOr<Item>),
-    Case(Kw, EOr<Item>),
+    While(Kw, OLoc<PExpr>),
+    For(Kw, Vec<OLoc<PVar>>, OKw, OLoc<PExpr>),
+    Match(Kw, OLoc<Item>),
+    Case(Kw, OLoc<Item>),
     //TODO work out where ion puts func description
     FuncList(Kw),
-    FuncDef(Kw, EOr<String>, Option<EOr<String>>, Vec<EOr<PVar>>),
+    FuncDef(Kw, Loc<String>, Option<Loc<String>>, Vec<Loc<PVar>>),
     Expr(PExpr),
     Break(Kw),
     Continue(Kw),
 }
 pub fn statement() -> impl Parser<PStatement> {
     wst(or(
-        or6(
-            let_statement(),
-            export_statement(),
+        or5(
+            ass_statement(),
+            //let_statement(),
+            //export_statement(),
             if_statement(),
             else_statement(),
             loop_statement(),
             func_def(),
         ),
         or6(
-            eor_word("end").map(|e| PStatement::End(e)),
-            eor_word("break").map(|e| PStatement::Break(e)),
-            eor_word("continue").map(|e| PStatement::Continue(e)),
-            (eor_word("match"), wst_eor(item)).map(|(kw, i)| PStatement::Match(kw, i)),
-            (eor_word("case"), wst_eor(item)).map(|(kw, i)| PStatement::Case(kw, i)),
+            locate("end").map(|e| PStatement::End(e)),
+            locate("break").map(|e| PStatement::Break(e)),
+            locate("continue").map(|e| PStatement::Continue(e)),
+            (locate("match"), wst(o_loc(item))).map(|(kw, i)| PStatement::Match(kw, i)),
+            (locate("case"), wst(o_loc(item))).map(|(kw, i)| PStatement::Case(kw, i)),
             expr.map(|e| PStatement::Expr(e)),
         ),
     ))
@@ -186,17 +180,17 @@ pub fn index() -> impl Parser<Index> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Item {
-    Bool(EOr<bool>),
-    Int(EOr<isize>),
-    Float(EOr<f64>),
-    Str(Vec<EOr<UnquotedPart>>),
-    Array(Kw, Vec<Item>, Kw),
+    Bool(Loc<bool>),
+    Int(Loc<isize>),
+    Float(Loc<f64>),
+    Str(Vec<Loc<UnquotedPart>>),
+    Array(Kw, Vec<Item>, OKw),
 }
 pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
     //TODO float
     let p = or5(
         locate(common_bool).map(|b| Item::Bool(b)),
-        (locate("["), repeat_until(wst(item), wst(e_or("]"))))
+        (locate("["), repeat_until(wst(item), wst(o_loc("]"))))
             .map(|(s, (l, e))| Item::Array(s, l, e)),
         locate(common_float).map(|f| Item::Float(f)),
         locate(common_int).map(|n| Item::Int(n)),
@@ -218,31 +212,37 @@ pub fn substitution<'a>(it: &LCChars<'a>) -> ParseRes<'a, Substitution> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Sub {
-    Var(String),
-    DollarB(PExpr),
-    AtVar(String),
-    AtB(PExpr),
-    NameSpace(String, String),
+    Var(Kw, OLoc<String>),
+    DollarB(Kw, OLoc<PExpr>, OKw),
+    AtVar(Kw, OLoc<String>),
+    AtB(Kw, OLoc<PExpr>, OKw),
+    VarWrap(Kw, OLoc<String>, OLoc<Option<(&'static str, String)>>, OKw),
 }
 
 pub fn sub() -> impl Parser<Sub> {
-    or5(
-        "$(".ig_then(wst(expr))
-            .then_ig(wst(")"))
-            .map(|e| Sub::DollarB(e)),
-        "$".ig_then(ident()).map(|i| Sub::Var(i)),
-        ("${", ident(), "::", ident(), "}").map(|(_, a, _, b, _)| Sub::NameSpace(a, b)),
-        "@(".ig_then(wst(expr))
-            .then_ig(wst(")"))
-            .map(|e| Sub::AtB(e)),
-        "@".ig_then(ident()).map(|i| Sub::AtVar(i)),
+    or3(
+        (locate(or("$(", "@(")), wst(o_loc(expr)), wst(o_loc(")"))).map(|(a, b, c)| match a.v {
+            "$(" => Sub::DollarB(a, b, c),
+            _ => Sub::AtB(a, b, c),
+        }),
+        (locate(or("@", "$")), o_loc(ident())).map(|(d, v)| match d.v {
+            "@" => Sub::AtVar(d, v),
+            _ => Sub::Var(d, v),
+        }),
+        (
+            locate("${"),
+            o_loc(ident()),
+            o_loc(maybe(("::", ident()))),
+            o_loc("}"),
+        )
+            .map(|(st, v, exp, fin)| Sub::VarWrap(st, v, exp, fin)),
     )
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PVar {
     name: String,
-    vtype: Option<EOr<VarType>>,
+    vtype: Option<OLoc<VarType>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -296,10 +296,10 @@ pub fn pipe() -> impl Parser<Pipe> {
 #[derive(Debug, PartialEq, Clone)]
 pub enum PExpr {
     Command(Command),
-    Pipe(EOr<Pipe>, Box<Command>, Box<PExpr>),
+    Pipe(Loc<Pipe>, Box<Command>, Box<OLoc<PExpr>>),
 }
 pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, PExpr> {
-    (command(), maybe((wst(locate(pipe())), expr)))
+    (command(), maybe((wst(locate(pipe())), o_loc(expr))))
         .map(|(l, popt)| match popt {
             Some((p, r)) => PExpr::Pipe(p, Box::new(l), Box::new(r)),
             None => PExpr::Command(l),
@@ -309,13 +309,13 @@ pub fn expr<'a>(it: &LCChars<'a>) -> ParseRes<'a, PExpr> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum StringPart {
-    Lit(EOr<String>),
+    Lit(Loc<String>),
     Sub(Substitution),
 }
 
-pub fn quoted() -> impl Parser<(Kw, Vec<StringPart>, Kw)> {
+pub fn quoted() -> impl Parser<(Kw, Vec<StringPart>, OKw)> {
     locate("\"")
-        .then(repeat_until(string_part(), e_or("\"")))
+        .then(repeat_until(string_part(), o_loc("\"")))
         .map(|(s, (m, f))| (s, m, f))
 }
 
@@ -341,9 +341,9 @@ pub fn string_part() -> impl Parser<StringPart> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum UnquotedPart {
-    Lit(EOr<String>),
+    Lit(Loc<String>),
     Sub(Substitution),
-    Quoted(Kw, Vec<StringPart>, Kw),
+    Quoted(Kw, Vec<StringPart>, OKw),
 }
 
 pub fn unquoted_escape() -> impl Parser<String> {
@@ -369,7 +369,7 @@ pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     )
 }
 
-pub fn unquoted() -> impl Parser<Vec<EOr<UnquotedPart>>> {
+pub fn unquoted() -> impl Parser<Vec<Loc<UnquotedPart>>> {
     repeat(locate(unquoted_string_part()), 1)
 }
 
@@ -388,68 +388,64 @@ pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
 
 pub fn var() -> impl Parser<PVar> {
     ident()
-        .then(maybe(wst(':').ig_then(e_or(var_type))))
+        .then(maybe(wst(':').ig_then(o_loc(var_type))))
         .map(|(n, t)| PVar { name: n, vtype: t })
 }
 
-pub fn let_statement() -> impl Parser<PStatement> {
-    or(
-        (eor_word("let"), peek(to_end())).map(|(e, _)| PStatement::LetList(e)),
-        (
-            eor_word("let"),
-            reflect(wst_eor(var()), wst_eor(ass_op()), wst_eor(item)).brk(),
-        )
-            .map(|(l, (a, b, c))| PStatement::Let(l, a, b, c)),
+pub fn ass_statement() -> impl Parser<PStatement> {
+    (
+        l_word(or("let", "export")),
+        or(
+            peek(to_end()).map(|_| None),
+            reflect(locate(wst(var())), o_loc(wst(ass_op())), o_loc(wst(item)))
+                .brk()
+                .map(|t| Some(t)),
+        ),
     )
-}
-
-pub fn export_statement() -> impl Parser<PStatement> {
-    or(
-        (eor_word("export"), peek(to_end())).map(|(e, _)| PStatement::ExportList(e)),
-        (
-            eor_word("export"),
-            reflect(wst_eor(var()), wst_eor(ass_op()), wst_eor(item)).brk(),
-        )
-            .map(|(l, (a, b, c))| PStatement::Export(l, a, b, c)),
-    )
+        .map(|(k, t)| match (k.v, t) {
+            ("let", Some((a, b, c))) => PStatement::Let(k, a, b, c),
+            ("export", Some((a, b, c))) => PStatement::Export(k, a, b, c),
+            ("let", None) => PStatement::LetList(k),
+            _ => PStatement::ExportList(k),
+        })
 }
 
 pub fn if_statement() -> impl Parser<PStatement> {
-    (eor_word("if"), e_or(expr.brk())).map(|(kw, e)| PStatement::If(kw, e))
+    (l_word("if"), o_loc(expr.brk())).map(|(kw, e)| PStatement::If(kw, e))
 }
 
 pub fn else_statement() -> impl Parser<PStatement> {
     or(
-        eor_word("else").map(|e| PStatement::Else(e)),
-        (eor_word("elif"), e_or(expr.brk())).map(|(kw, e)| PStatement::Elif(kw, e)),
+        l_word("else").map(|e| PStatement::Else(e)),
+        (l_word("elif"), o_loc(expr.brk())).map(|(kw, e)| PStatement::Elif(kw, e)),
     )
 }
 
 pub fn loop_statement() -> impl Parser<PStatement> {
     or(
         (
-            eor_word("for"),
+            l_word("for"),
             (
-                repeat_until(wst_eor(var()), wst_eor(keyword("in"))),
-                wst_eor(expr),
+                repeat_until(wst(o_loc(var())), ol_word("in")),
+                wst(o_loc(expr)),
             )
                 .brk(),
         )
             .map(|(fk, ((vars, ik), ex))| PStatement::For(fk, vars, ik, ex)),
-        (eor_word("while"), e_or(expr.brk())).map(|(kw, ex)| PStatement::While(kw, ex)),
+        (l_word("while"), o_loc(expr.brk())).map(|(kw, ex)| PStatement::While(kw, ex)),
     )
 }
 
 pub fn func_def() -> impl Parser<PStatement> {
     //TODO work out how function hints are written
     or(
-        (eor_word("fn"), peek(to_end())).map(|(kw, _)| PStatement::FuncList(kw)),
+        (l_word("fn"), peek(to_end())).map(|(kw, _)| PStatement::FuncList(kw)),
         (
-            eor_word("fn"),
+            l_word("fn"),
             (
-                wst_eor(ident()),
-                repeat_until_ig(wst_eor(var()), or(peek(wst('-')), to_end())),
-                maybe(e_or(wst("--").ig_then(Any.except("\n;").any()))),
+                locate(ident()),
+                repeat_until_ig(wst(locate(var())), or(peek(wst('-')), to_end())),
+                maybe(locate(wst("--").ig_then(Any.except("\n;").any()))),
             )
                 .brk(),
         )

@@ -30,7 +30,13 @@ impl fmt::Display for SType {
     }
 }
 
-pub fn ins_eor<V>(mp: &mut BTreeMap<usize, SType>, e: &EOr<V>, st: SType) {
+pub fn ins_oloc<V>(mp: &mut BTreeMap<usize, SType>, e: &OLoc<V>, st: SType) {
+    if let Some(i) = e {
+        ins_loc(mp, i, st)
+    }
+}
+
+pub fn ins_loc<V>(mp: &mut BTreeMap<usize, SType>, e: &Loc<V>, st: SType) {
     ins(mp, e.start, st);
     ins(mp, e.fin, SType::Reset);
 }
@@ -50,46 +56,46 @@ pub fn col_statement(s: &PStatement, cmap: &mut BTreeMap<usize, SType>) {
         | PStatement::FuncList(kw)
         | PStatement::End(kw)
         | PStatement::Break(kw) => {
-            ins_eor(cmap, kw, SType::Keyword);
+            ins_loc(cmap, kw, SType::Keyword);
         }
         PStatement::Let(lt, vars, assop, items) | PStatement::Export(lt, vars, assop, items) => {
-            ins_eor(cmap, lt, SType::Keyword);
+            ins_loc(cmap, lt, SType::Keyword);
             for v in vars {
-                ins_eor(cmap, v, SType::Var);
+                ins_loc(cmap, v, SType::Var);
             }
-            ins_eor(cmap, assop, SType::Op);
-            for i in items {
-                if let Some(v) = &i.v {
-                    col_item(v, cmap);
+            ins_oloc(cmap, assop, SType::Op);
+            for oi in items {
+                if let Some(i) = oi {
+                    col_item(&i.v, cmap);
                 }
                 //ins_eor(cmap, i, SType::Var);
             }
         }
         PStatement::Elif(kw, ex) | PStatement::If(kw, ex) | PStatement::While(kw, ex) => {
-            ins_eor(cmap, kw, SType::Keyword);
-            ins_eor(cmap, ex, SType::Var);
+            ins_loc(cmap, kw, SType::Keyword);
+            ins_oloc(cmap, ex, SType::Var);
         }
         PStatement::Match(kw, it) | PStatement::Case(kw, it) => {
-            ins_eor(cmap, kw, SType::Keyword);
-            ins_eor(cmap, it, SType::Var);
+            ins_loc(cmap, kw, SType::Keyword);
+            ins_oloc(cmap, it, SType::Var);
         }
         PStatement::FuncDef(kw, nm, doc, vars) => {
-            ins_eor(cmap, kw, SType::Keyword);
-            ins_eor(cmap, nm, SType::Ident);
+            ins_loc(cmap, kw, SType::Keyword);
+            ins_loc(cmap, nm, SType::Ident);
             for v in vars {
-                ins_eor(cmap, v, SType::Var);
+                ins_loc(cmap, v, SType::Var);
             }
             if let Some(d) = doc {
-                ins_eor(cmap, d, SType::Doc);
+                ins_loc(cmap, d, SType::Doc);
             }
         }
         PStatement::For(kw, vars, ikw, it) => {
-            ins_eor(cmap, kw, SType::Keyword);
+            ins_loc(cmap, kw, SType::Keyword);
             for v in vars {
-                ins_eor(cmap, v, SType::Var);
+                ins_oloc(cmap, v, SType::Var);
             }
-            ins_eor(cmap, ikw, SType::Keyword);
-            ins_eor(cmap, it, SType::Var);
+            ins_oloc(cmap, ikw, SType::Keyword);
+            ins_oloc(cmap, it, SType::Var);
         }
         PStatement::Expr(e) => {
             col_expr(e, cmap);
@@ -108,8 +114,11 @@ pub fn col_expr(e: &PExpr, cmap: &mut BTreeMap<usize, SType>) {
             for i in &c.v {
                 col_item(i, cmap);
             }
-            ins_eor(cmap, p, SType::Op);
-            col_expr(expr, cmap);
+            ins_loc(cmap, p, SType::Op);
+            if let Some(lex) = expr.as_ref() {
+                col_expr(&lex.v, cmap);
+            }
+            //col_expr(expr, cmap);
         }
     }
 }
@@ -117,34 +126,33 @@ pub fn col_expr(e: &PExpr, cmap: &mut BTreeMap<usize, SType>) {
 pub fn col_item(i: &Item, cmap: &mut BTreeMap<usize, SType>) {
     match i {
         Item::Bool(b) => {
-            ins_eor(cmap, b, SType::Lit);
+            ins_loc(cmap, b, SType::Lit);
         }
         Item::Float(f) => {
-            ins_eor(cmap, f, SType::Lit);
+            ins_loc(cmap, f, SType::Lit);
         }
         Item::Int(i) => {
-            ins_eor(cmap, i, SType::Lit);
+            ins_loc(cmap, i, SType::Lit);
         }
         Item::Array(s, it, f) => {
-            ins_eor(cmap, s, SType::Op);
+            ins_loc(cmap, s, SType::Op);
             for i in it {
                 col_item(i, cmap);
             }
-            ins_eor(cmap, f, SType::Op);
+            ins_oloc(cmap, f, SType::Op);
         }
         Item::Str(pts) => {
             for p in pts {
                 match &p.v {
-                    Some(UnquotedPart::Quoted(s, q, f)) => {
-                        ins_eor(cmap, s, SType::Lit);
+                    UnquotedPart::Quoted(s, q, f) => {
+                        ins_loc(cmap, s, SType::Lit);
                         for qp in q {
                             col_quoted(qp, cmap);
                         }
-
-                        ins_eor(cmap, f, SType::Lit);
+                        ins_oloc(cmap, f, SType::Lit);
                     }
-                    Some(UnquotedPart::Lit(l)) => {
-                        ins_eor(cmap, l, SType::Reset);
+                    UnquotedPart::Lit(l) => {
+                        ins_loc(cmap, l, SType::Reset);
                     }
                     _ => {}
                 }
@@ -155,7 +163,7 @@ pub fn col_item(i: &Item, cmap: &mut BTreeMap<usize, SType>) {
 
 pub fn col_quoted(sp: &StringPart, cmap: &mut BTreeMap<usize, SType>) {
     match sp {
-        StringPart::Lit(l) => ins_eor(cmap, l, SType::Var),
+        StringPart::Lit(l) => ins_loc(cmap, l, SType::Var),
         StringPart::Sub(_) => {}
     }
 }

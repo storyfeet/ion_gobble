@@ -122,7 +122,7 @@ pub fn try_partial(
             }
             Err(_) => {
                 let (it, errs) = err_end().parse(&lc).expect("Error should end OK");
-                ins_eor(&mut mp, &errs, SType::Err);
+                ins_oloc(&mut mp, &errs, SType::Err);
                 lc = it;
             }
         }
