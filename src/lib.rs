@@ -217,20 +217,21 @@ pub enum Sub {
     AtVar(String),
     AtB(Expr),
     //TODO switch to VarWrap
-    NameSpace(String, String),
+    VarWrap(String, Option<String>),
 }
 
 pub fn sub() -> impl Parser<Sub> {
-    or5(
-        "$(".ig_then(wst(expr))
-            .then_ig(wst(")"))
-            .map(|e| Sub::DollarB(e)),
-        "$".ig_then(ident()).map(|i| Sub::Var(i)),
-        ("${", ident(), "::", ident(), "}").map(|(_, a, _, b, _)| Sub::NameSpace(a, b)),
-        "@(".ig_then(wst(expr))
-            .then_ig(wst(")"))
-            .map(|e| Sub::AtB(e)),
-        "@".ig_then(ident()).map(|i| Sub::AtVar(i)),
+    or3(
+        (or("$(", "@("), wst(expr), wst(")")).map(|(a, b, _)| match a {
+            "$(" => Sub::DollarB(b),
+            _ => Sub::AtB(b),
+        }),
+        (or("@", "$"), ident()).map(|(d, v)| match d {
+            "@" => Sub::AtVar(v),
+            _ => Sub::Var(v),
+        }),
+        ("${", ident(), maybe("::".ig_then(ident())), "}")
+            .map(|(_, v, exp, _)| Sub::VarWrap(v, exp)),
     )
 }
 

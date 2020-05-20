@@ -95,7 +95,9 @@ pub fn col_statement(s: &PStatement, cmap: &mut BTreeMap<usize, SType>) {
                 ins_oloc(cmap, v, SType::Var);
             }
             ins_oloc(cmap, ikw, SType::Keyword);
-            ins_oloc(cmap, it, SType::Var);
+            if let Some(i) = it {
+                col_expr(&i.v, cmap);
+            }
         }
         PStatement::Expr(e) => {
             col_expr(e, cmap);
@@ -118,7 +120,6 @@ pub fn col_expr(e: &PExpr, cmap: &mut BTreeMap<usize, SType>) {
             if let Some(lex) = expr.as_ref() {
                 col_expr(&lex.v, cmap);
             }
-            //col_expr(expr, cmap);
         }
     }
 }
@@ -154,7 +155,7 @@ pub fn col_item(i: &Item, cmap: &mut BTreeMap<usize, SType>) {
                     UnquotedPart::Lit(l) => {
                         ins_loc(cmap, l, SType::Reset);
                     }
-                    _ => {}
+                    UnquotedPart::Sub(s) => col_sub(&s.sub, cmap),
                 }
             }
         }
@@ -163,8 +164,30 @@ pub fn col_item(i: &Item, cmap: &mut BTreeMap<usize, SType>) {
 
 pub fn col_quoted(sp: &StringPart, cmap: &mut BTreeMap<usize, SType>) {
     match sp {
-        StringPart::Lit(l) => ins_loc(cmap, l, SType::Var),
-        StringPart::Sub(_) => {}
+        StringPart::Lit(l) => ins_loc(cmap, l, SType::Lit),
+        StringPart::Sub(s) => col_sub(&s.sub, cmap),
+    }
+}
+
+pub fn col_sub(s: &Sub, cmap: &mut BTreeMap<usize, SType>) {
+    match s {
+        Sub::Var(sym, vname) | Sub::AtVar(sym, vname) => {
+            ins_loc(cmap, sym, SType::Var);
+            ins_oloc(cmap, vname, SType::Var);
+        }
+        Sub::DollarB(st, v, fin) | Sub::AtB(st, v, fin) => {
+            ins_loc(cmap, st, SType::Op);
+            if let Some(ex) = v {
+                col_expr(&ex.v, cmap);
+            }
+            ins_oloc(cmap, fin, SType::Op);
+        }
+        Sub::VarWrap(kw, _, _, fin) => {
+            ins(cmap, kw.start, SType::Var);
+            if let Some(f) = fin {
+                ins(cmap, f.fin, SType::Reset);
+            }
+        }
     }
 }
 

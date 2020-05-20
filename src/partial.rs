@@ -201,8 +201,8 @@ pub fn item<'a>(it: &LCChars<'a>) -> ParseRes<'a, Item> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Substitution {
-    sub: Sub,
-    index: Option<Index>,
+    pub sub: Sub,
+    pub index: Option<Index>,
 }
 pub fn substitution<'a>(it: &LCChars<'a>) -> ParseRes<'a, Substitution> {
     (sub(), maybe(index()))
@@ -426,7 +426,7 @@ pub fn loop_statement() -> impl Parser<PStatement> {
         (
             l_word("for"),
             (
-                repeat_until(wst(o_loc(var())), ol_word("in")),
+                repeat_until(wst(o_loc(var())), wst(ol_word("in"))),
                 wst(o_loc(expr)),
             )
                 .brk(),
