@@ -242,12 +242,34 @@ pub struct Var {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct EnvItem {
+    k: String,
+    v: Item,
+}
+
+pub fn env_item() -> impl Parser<Out = EnvItem> {
+    (wst(ident()), '=', item).map(|(k, _, v)| EnvItem { k, v })
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct EnvSet {
+    v: Vec<EnvItem>,
+}
+
+pub fn env_set() -> impl Parser<Out = EnvSet> {
+    keyword("env")
+        .ig_then(repeat(env_item(), 0))
+        .map(|v| EnvSet { v })
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct Command {
+    env: Option<EnvSet>,
     v: Vec<Item>,
 }
 
 pub fn command() -> impl Parser<Out = Command> {
-    repeat(wst(item), 1).map(|v| Command { v })
+    (maybe(env_set()), repeat(wst(item), 1)).map(|(env, v)| Command { env, v })
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -349,7 +371,7 @@ pub fn unquoted_string_part() -> impl Parser<Out = UnquotedPart> {
     or3(
         string_repeat(
             or(
-                Any.except(" \n\r()@$\\\"|&><^#;[]").min_n(1),
+                Any.except(" \t\n\r()@$\\\"|&><^#;[]=").min_n(1),
                 unquoted_escape(),
             ),
             1,

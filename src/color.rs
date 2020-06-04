@@ -108,13 +108,16 @@ pub fn col_statement(s: &PStatement, cmap: &mut BTreeMap<usize, SType>) {
 pub fn col_expr(e: &PExpr, cmap: &mut BTreeMap<usize, SType>) {
     match e {
         PExpr::Command(c) => {
+            if let Some(ref ei) = c.env {
+                ins_loc(cmap, &ei.env, SType::Keyword);
+            }
             for i in &c.v {
-                col_item(i, cmap);
+                col_item(&i.v, cmap);
             }
         }
         PExpr::Pipe(p, c, expr) => {
             for i in &c.v {
-                col_item(i, cmap);
+                col_item(&i.v, cmap);
             }
             ins_loc(cmap, p, SType::Op);
             if let Some(lex) = expr.as_ref() {

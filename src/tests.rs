@@ -28,6 +28,7 @@ pub fn test_statements() {
         (
             "other",
             Statement::Expr(Expr::Command(Command {
+                env: None,
                 v: vec![simple_item("do"), simple_item("thing")],
             }))
         )

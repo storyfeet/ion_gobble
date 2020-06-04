@@ -246,12 +246,34 @@ pub struct PVar {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct PEnvItem {
+    k: Loc<String>,
+    eq: OLoc<char>,
+    v: OLoc<Item>,
+}
+
+pub fn env_item() -> impl Parser<Out = PEnvItem> {
+    (locate(ident()), o_loc('='), o_loc(item)).map(|(k, eq, v)| PEnvItem { k, eq, v })
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct PEnvSet {
+    pub env: Kw,
+    pub v: Vec<PEnvItem>,
+}
+
+pub fn env_set() -> impl Parser<Out = PEnvSet> {
+    (l_word("env"), repeat(wst(env_item()), 1)).map(|(env, v)| PEnvSet { env, v })
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct Command {
-    pub v: Vec<Item>,
+    pub env: Option<PEnvSet>,
+    pub v: Vec<Loc<Item>>,
 }
 
 pub fn command() -> impl Parser<Out = Command> {
-    repeat(wst(item), 1).map(|v| Command { v })
+    (maybe(env_set()), repeat(wst(locate(item)), 0)).map(|(env, v)| Command { env, v })
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -358,7 +380,7 @@ pub fn unquoted_string_part() -> impl Parser<Out = UnquotedPart> {
     or3(
         locate(string_repeat(
             or(
-                Any.except(" \n\r()@$\\\"|&><^#;[]").min_n(1),
+                Any.except(" \t\n\r()@$\\\"|&><^#;[]=").min_n(1),
                 unquoted_escape(),
             ),
             1,
