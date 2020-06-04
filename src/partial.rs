@@ -13,7 +13,7 @@ pub struct Loc<V> {
     pub v: V,
 }
 
-pub fn err_end() -> impl Parser<OLoc<()>> {
+pub fn err_end() -> impl Parser<Out = OLoc<()>> {
     o_loc(
         (
             skip_while(Any.except("\n;"), 1),
@@ -23,19 +23,19 @@ pub fn err_end() -> impl Parser<OLoc<()>> {
     )
 }
 
-pub fn locate<P: Parser<V>, V>(p: P) -> impl Parser<Loc<V>> {
+pub fn locate<P: Parser>(p: P) -> impl Parser<Out = Loc<P::Out>> {
     (gobble::index, p, gobble::index).map(|(start, v, fin)| Loc { start, v: v, fin })
 }
 
-pub fn l_word<P: Parser<V>, V>(p: P) -> impl Parser<Loc<V>> {
+pub fn l_word<P: Parser>(p: P) -> impl Parser<Out = Loc<P::Out>> {
     locate(keyword(p))
 }
 
-pub fn ol_word<P: Parser<V>, V>(p: P) -> impl Parser<OLoc<V>> {
+pub fn ol_word<P: Parser>(p: P) -> impl Parser<Out = OLoc<P::Out>> {
     o_loc(keyword(p))
 }
 
-pub fn o_loc<P: Parser<V>, V>(p: P) -> impl Parser<OLoc<V>> {
+pub fn o_loc<P: Parser>(p: P) -> impl Parser<Out = OLoc<P::Out>> {
     or(
         peek(to_end().try_map(|c| {
             if c == '_' {
@@ -48,7 +48,7 @@ pub fn o_loc<P: Parser<V>, V>(p: P) -> impl Parser<OLoc<V>> {
     )
 }
 
-pub fn to_end() -> impl Parser<char> {
+pub fn to_end() -> impl Parser<Out = char> {
     (
         skip_repeat(
             or3(
@@ -86,7 +86,7 @@ pub enum PStatement {
     Break(Kw),
     Continue(Kw),
 }
-pub fn statement() -> impl Parser<PStatement> {
+pub fn statement() -> impl Parser<Out = PStatement> {
     wst(or(
         or5(
             ass_statement(),
@@ -124,7 +124,7 @@ pub enum RangeEnd {
     Sub(Substitution),
 }
 
-pub fn range_end() -> impl Parser<RangeEnd> {
+pub fn range_end() -> impl Parser<Out = RangeEnd> {
     or(
         common_int.map(|n| RangeEnd::Int(n)),
         substitution.map(|s| RangeEnd::Sub(s)),
@@ -135,7 +135,7 @@ pub enum RangeOp {
     Exc,
     Inc,
 }
-pub fn range_op() -> impl Parser<RangeOp> {
+pub fn range_op() -> impl Parser<Out = RangeOp> {
     ("..", maybe("=")).map(|(_, e)| match e {
         Some(_) => RangeOp::Inc,
         None => RangeOp::Exc,
@@ -149,7 +149,7 @@ pub struct Range {
     op: Option<RangeOp>,
 }
 
-pub fn range() -> impl Parser<Range> {
+pub fn range() -> impl Parser<Out = Range> {
     or(
         (range_end(), maybe((range_op(), maybe(range_end())))).map(|(s, op)| match op {
             Some((op, fin)) => Range {
@@ -174,7 +174,7 @@ pub fn range() -> impl Parser<Range> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Index(Vec<Range>);
 
-pub fn index() -> impl Parser<Index> {
+pub fn index() -> impl Parser<Out = Index> {
     ('[', (repeat(wst(range()), 1), wst(']')).brk()).map(|(_, (i, _))| Index(i))
 }
 
@@ -219,7 +219,7 @@ pub enum Sub {
     VarWrap(Kw, OLoc<String>, OLoc<Option<(&'static str, String)>>, OKw),
 }
 
-pub fn sub() -> impl Parser<Sub> {
+pub fn sub() -> impl Parser<Out = Sub> {
     or3(
         (locate(or("$(", "@(")), wst(o_loc(expr)), wst(o_loc(")"))).map(|(a, b, c)| match a.v {
             "$(" => Sub::DollarB(a, b, c),
@@ -250,7 +250,7 @@ pub struct Command {
     pub v: Vec<Item>,
 }
 
-pub fn command() -> impl Parser<Command> {
+pub fn command() -> impl Parser<Out = Command> {
     repeat(wst(item), 1).map(|v| Command { v })
 }
 
@@ -274,7 +274,7 @@ pub struct Pipe {
     tp: PipeType,
 }
 
-pub fn output_type() -> impl Parser<OutputType> {
+pub fn output_type() -> impl Parser<Out = OutputType> {
     maybe("^&".one()).map(|op| match op {
         Some('^') => OutputType::StdErr,
         Some('&') => OutputType::Combined,
@@ -282,14 +282,14 @@ pub fn output_type() -> impl Parser<OutputType> {
     })
 }
 
-pub fn pipe_type() -> impl Parser<PipeType> {
+pub fn pipe_type() -> impl Parser<Out = PipeType> {
     or3(
         ">>".map(|_| PipeType::Append),
         ">".map(|_| PipeType::Write),
         "|".map(|_| PipeType::Bar),
     )
 }
-pub fn pipe() -> impl Parser<Pipe> {
+pub fn pipe() -> impl Parser<Out = Pipe> {
     (output_type(), pipe_type()).map(|(out, tp)| Pipe { out, tp })
 }
 
@@ -313,13 +313,13 @@ pub enum StringPart {
     Sub(Substitution),
 }
 
-pub fn quoted() -> impl Parser<(Kw, Vec<StringPart>, OKw)> {
+pub fn quoted() -> impl Parser<Out = (Kw, Vec<StringPart>, OKw)> {
     locate("\"")
         .then(repeat_until(string_part(), o_loc("\"")))
         .map(|(s, (m, f))| (s, m, f))
 }
 
-pub fn quoted_escape() -> impl Parser<String> {
+pub fn quoted_escape() -> impl Parser<Out = String> {
     '\\'.ig_then(or4(
         iws(1).map(|_| String::new()),
         't'.map(|_| '\t'.to_string()),
@@ -328,7 +328,7 @@ pub fn quoted_escape() -> impl Parser<String> {
     ))
 }
 
-pub fn string_part() -> impl Parser<StringPart> {
+pub fn string_part() -> impl Parser<Out = StringPart> {
     or(
         locate(string_repeat(
             or(Any.except("@$\"\\").min_n(1), quoted_escape()),
@@ -346,7 +346,7 @@ pub enum UnquotedPart {
     Quoted(Kw, Vec<StringPart>, OKw),
 }
 
-pub fn unquoted_escape() -> impl Parser<String> {
+pub fn unquoted_escape() -> impl Parser<Out = String> {
     '\\'.ig_then(or3(
         //iws(1).map(|_| String::new()),
         't'.map(|_| '\t'.to_string()),
@@ -354,7 +354,7 @@ pub fn unquoted_escape() -> impl Parser<String> {
         Any.one().map(|s| s.to_string()),
     ))
 }
-pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
+pub fn unquoted_string_part() -> impl Parser<Out = UnquotedPart> {
     or3(
         locate(string_repeat(
             or(
@@ -369,7 +369,7 @@ pub fn unquoted_string_part() -> impl Parser<UnquotedPart> {
     )
 }
 
-pub fn unquoted() -> impl Parser<Vec<Loc<UnquotedPart>>> {
+pub fn unquoted() -> impl Parser<Out = Vec<Loc<UnquotedPart>>> {
     repeat(locate(unquoted_string_part()), 1)
 }
 
@@ -386,13 +386,13 @@ pub fn var_type<'a>(it: &LCChars<'a>) -> ParseRes<'a, VarType> {
     .parse(it)
 }
 
-pub fn var() -> impl Parser<PVar> {
+pub fn var() -> impl Parser<Out = PVar> {
     ident()
         .then(maybe(wst(':').ig_then(o_loc(var_type))))
         .map(|(n, t)| PVar { name: n, vtype: t })
 }
 
-pub fn ass_statement() -> impl Parser<PStatement> {
+pub fn ass_statement() -> impl Parser<Out = PStatement> {
     (
         l_word(or("let", "export")),
         or(
@@ -410,18 +410,18 @@ pub fn ass_statement() -> impl Parser<PStatement> {
         })
 }
 
-pub fn if_statement() -> impl Parser<PStatement> {
+pub fn if_statement() -> impl Parser<Out = PStatement> {
     (l_word("if"), o_loc(expr.brk())).map(|(kw, e)| PStatement::If(kw, e))
 }
 
-pub fn else_statement() -> impl Parser<PStatement> {
+pub fn else_statement() -> impl Parser<Out = PStatement> {
     or(
         l_word("else").map(|e| PStatement::Else(e)),
         (l_word("elif"), o_loc(expr.brk())).map(|(kw, e)| PStatement::Elif(kw, e)),
     )
 }
 
-pub fn loop_statement() -> impl Parser<PStatement> {
+pub fn loop_statement() -> impl Parser<Out = PStatement> {
     or(
         (
             l_word("for"),
@@ -436,7 +436,7 @@ pub fn loop_statement() -> impl Parser<PStatement> {
     )
 }
 
-pub fn func_def() -> impl Parser<PStatement> {
+pub fn func_def() -> impl Parser<Out = PStatement> {
     //TODO work out how function hints are written
     or(
         (l_word("fn"), peek(to_end())).map(|(kw, _)| PStatement::FuncList(kw)),
@@ -453,6 +453,6 @@ pub fn func_def() -> impl Parser<PStatement> {
     )
 }
 
-pub fn command_statement() -> impl Parser<Vec<Item>> {
+pub fn command_statement() -> impl Parser<Out = Vec<Item>> {
     repeat(wst(item), 1)
 }
